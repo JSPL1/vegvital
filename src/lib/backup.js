@@ -6,10 +6,12 @@ import { getState, setState } from './store.js';
 
 const native = Capacitor.isNativePlatform();
 
-function snapshot() {
+function snapshot(includeKeys = false) {
   const s = structuredClone(getState());
   // API keys are never put in a backup file (it may travel through WhatsApp/Drive)
-  s.profile = { ...s.profile, apiKey: '', geminiKey: '', groqKey: '', neonUrl: '' };
+  // Shared backups (WhatsApp/Drive) never carry keys. The private daily copy on the phone does,
+  // so a reinstall + Restore brings everything back with no pasting.
+  if (!includeKeys) s.profile = { ...s.profile, apiKey: '', geminiKey: '', groqKey: '', neonUrl: '' };
   delete s.pending; delete s.update; delete s.pendingDone;
   return { app: 'VegVital', version: 1, createdAt: new Date().toISOString(), state: s };
 }
@@ -59,7 +61,7 @@ export function restoreFromText(text) {
     .filter((w, i, arr) => arr.findIndex((x) => x.date === w.date) === i);
   setState({
     onboarded: true,
-    profile: { ...cur.profile, ...b.profile, apiKey: cur.profile.apiKey || '', geminiKey: cur.profile.geminiKey || '', groqKey: cur.profile.groqKey || '', neonUrl: cur.profile.neonUrl || '' },
+    profile: { ...cur.profile, ...b.profile, apiKey: cur.profile.apiKey || b.profile.apiKey || '', geminiKey: cur.profile.geminiKey || b.profile.geminiKey || '', groqKey: cur.profile.groqKey || b.profile.groqKey || '', neonUrl: cur.profile.neonUrl || b.profile.neonUrl || '' },
     days, weights,
     lastBackup: b.lastBackup || cur.lastBackup,
   });
@@ -78,9 +80,10 @@ export async function autoBackup() {
   const s = getState();
   if (!s.onboarded) return;
   const last = s.lastAutoBackup ? new Date(s.lastAutoBackup) : null;
-  if (last && Date.now() - last < 20 * 3600e3) return;
+  const sig = [s.profile.geminiKey, s.profile.groqKey, s.profile.neonUrl, s.profile.apiKey].join('|').length;
+  if (last && Date.now() - last < 20 * 3600e3 && s.autoBackupSig === sig) return;
   try {
-    await Filesystem.writeFile({ path: 'VegVital/VegVital-autobackup.json', data: JSON.stringify(snapshot()), directory: Directory.Documents, encoding: Encoding.UTF8, recursive: true });
-    setState({ lastAutoBackup: new Date().toISOString() });
+    await Filesystem.writeFile({ path: 'VegVital/VegVital-autobackup.json', data: JSON.stringify(snapshot(true)), directory: Directory.Documents, encoding: Encoding.UTF8, recursive: true });
+    setState({ lastAutoBackup: new Date().toISOString(), autoBackupSig: sig });
   } catch { /* storage not available: the manual backup still works */ }
 }

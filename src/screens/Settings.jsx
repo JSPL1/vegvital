@@ -5,7 +5,7 @@ import { connectHealth, scheduleReminders, healthAvailable } from '../lib/auto.j
 import { testKey, testGeminiKey, testGroqKey } from '../lib/ai.js';
 import { testCloud } from '../lib/cloud.js';
 import { runCloudSync } from '../lib/photos.js';
-import { backupNow, pickAndRestore, backupAgeDays } from '../lib/backup.js';
+import { backupNow, pickAndRestore, backupAgeDays, autoBackup } from '../lib/backup.js';
 import { Card, stagger, rise, Button, Pill, tap } from '../components/ui.jsx';
 
 function Field({ label, children }) {
@@ -27,21 +27,21 @@ export default function Settings({ back, toast }) {
 
   async function saveKey() {
     setTesting(true);
-    try { await testKey(key.trim()); updateProfile({ apiKey: key.trim() }); toast('✅ AI key works — photo scanning is ready'); }
+    try { await testKey(key.trim()); updateProfile({ apiKey: key.trim() }); autoBackup(); toast('✅ AI key works — photo scanning is ready'); }
     catch (e) { toast('❌ Key rejected: ' + String(e?.message || e).slice(0, 80)); }
     setTesting(false);
   }
 
   async function saveGemini() {
     setTesting(true);
-    try { const m = await testGeminiKey(gkey.trim()); updateProfile({ geminiKey: gkey.trim(), aiProvider: 'gemini' }); toast(`✅ Free Gemini AI ready (${m.replace('models/', '')})`); }
+    try { const m = await testGeminiKey(gkey.trim()); updateProfile({ geminiKey: gkey.trim(), aiProvider: 'gemini' }); autoBackup(); toast(`✅ Free Gemini AI ready (${m.replace('models/', '')})`); }
     catch (e) { toast('❌ Gemini key rejected: ' + String(e?.message || e).slice(0, 80)); }
     setTesting(false);
   }
 
   async function saveGroq() {
     setTesting(true);
-    try { const m = await testGroqKey(qkey.trim()); updateProfile({ groqKey: qkey.trim(), aiProvider: 'gemini' }); toast(`✅ Groq backup AI ready (${String(m).split('/').pop()})`); }
+    try { const m = await testGroqKey(qkey.trim()); updateProfile({ groqKey: qkey.trim(), aiProvider: 'gemini' }); autoBackup(); toast(`✅ Groq backup AI ready (${String(m).split('/').pop()})`); }
     catch (e) { toast('❌ Groq key rejected: ' + String(e?.message || e).slice(0, 80)); }
     setTesting(false);
   }
@@ -52,7 +52,7 @@ export default function Settings({ back, toast }) {
       const u = nurl.trim();
       if (!/^postgres(ql)?:\/\//.test(u)) throw new Error('paste the full link that starts with postgresql://');
       const n = await testCloud(u);
-      updateProfile({ neonUrl: u });
+      updateProfile({ neonUrl: u }); autoBackup();
       toast(`✅ Neon cloud connected · ${n} photo${n === 1 ? '' : 's'} stored`);
       runCloudSync();
     } catch (e) {
@@ -213,7 +213,7 @@ export default function Settings({ back, toast }) {
           <li>💾 A copy is also saved automatically every day to <b>Documents/VegVital</b> on your phone</li>
           <li>📲 After reinstalling: on the first screen tap <b>Restore from backup</b> and pick that file</li>
           <li>🔄 Android Google Backup also restores automatically if it’s on: Settings → Google → Backup → “Back up to Google Drive” ON</li>
-          <li>🔒 AI keys are not stored in backups — paste them again after restoring</li>
+          <li>🔑 Keys (Gemini, Groq, Neon) are kept through updates. After a reinstall, restoring the <b>Documents › VegVital › VegVital-autobackup.json</b> file brings them back too — shared backups never include keys</li>
         </ul>
         <Button variant="danger" onClick={() => { if (confirm("Delete all logged days? Profile is kept.")) { setState({ days: {}, weights: [] }); toast("Cleared"); } }}>Clear history</Button>
       </Card>
