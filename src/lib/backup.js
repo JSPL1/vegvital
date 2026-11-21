@@ -9,7 +9,7 @@ const native = Capacitor.isNativePlatform();
 function snapshot() {
   const s = structuredClone(getState());
   // API keys are never put in a backup file (it may travel through WhatsApp/Drive)
-  s.profile = { ...s.profile, apiKey: '', geminiKey: '' };
+  s.profile = { ...s.profile, apiKey: '', geminiKey: '', groqKey: '', neonUrl: '' };
   delete s.pending; delete s.update; delete s.pendingDone;
   return { app: 'VegVital', version: 1, createdAt: new Date().toISOString(), state: s };
 }
@@ -59,7 +59,7 @@ export function restoreFromText(text) {
     .filter((w, i, arr) => arr.findIndex((x) => x.date === w.date) === i);
   setState({
     onboarded: true,
-    profile: { ...cur.profile, ...b.profile, apiKey: cur.profile.apiKey || '', geminiKey: cur.profile.geminiKey || '' },
+    profile: { ...cur.profile, ...b.profile, apiKey: cur.profile.apiKey || '', geminiKey: cur.profile.geminiKey || '', groqKey: cur.profile.groqKey || '', neonUrl: cur.profile.neonUrl || '' },
     days, weights,
     lastBackup: b.lastBackup || cur.lastBackup,
   });

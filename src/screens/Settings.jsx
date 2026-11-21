@@ -2,7 +2,9 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useStore, updateProfile, suggestedKcal, bmi, setState, getState } from '../lib/store.js';
 import { connectHealth, scheduleReminders, healthAvailable } from '../lib/auto.js';
-import { testKey, testGeminiKey } from '../lib/ai.js';
+import { testKey, testGeminiKey, testGroqKey } from '../lib/ai.js';
+import { testCloud } from '../lib/cloud.js';
+import { runCloudSync } from '../lib/photos.js';
 import { backupNow, pickAndRestore, backupAgeDays } from '../lib/backup.js';
 import { Card, stagger, rise, Button, Pill, tap } from '../components/ui.jsx';
 
@@ -17,6 +19,8 @@ export default function Settings({ back, toast }) {
   const age = backupAgeDays();
   const [key, setKey] = useState(p.apiKey);
   const [gkey, setGkey] = useState(p.geminiKey || '');
+  const [qkey, setQkey] = useState(p.groqKey || '');
+  const [nurl, setNurl] = useState(p.neonUrl || '');
   const [testing, setTesting] = useState(false);
   const num = (k) => (e) => updateProfile({ [k]: Number(e.target.value) });
   const str = (k) => (e) => updateProfile({ [k]: e.target.value });
@@ -32,6 +36,26 @@ export default function Settings({ back, toast }) {
     setTesting(true);
     try { const m = await testGeminiKey(gkey.trim()); updateProfile({ geminiKey: gkey.trim(), aiProvider: 'gemini' }); toast(`✅ Free Gemini AI ready (${m.replace('models/', '')})`); }
     catch (e) { toast('❌ Gemini key rejected: ' + String(e?.message || e).slice(0, 80)); }
+    setTesting(false);
+  }
+
+  async function saveGroq() {
+    setTesting(true);
+    try { const m = await testGroqKey(qkey.trim()); updateProfile({ groqKey: qkey.trim(), aiProvider: 'gemini' }); toast(`✅ Groq backup AI ready (${String(m).split('/').pop()})`); }
+    catch (e) { toast('❌ Groq key rejected: ' + String(e?.message || e).slice(0, 80)); }
+    setTesting(false);
+  }
+
+  async function saveNeon() {
+    setTesting(true);
+    try {
+      const u = nurl.trim();
+      if (!/^postgres(ql)?:\/\//.test(u)) throw new Error('paste the full link that starts with postgresql://');
+      const n = await testCloud(u);
+      updateProfile({ neonUrl: u });
+      toast(`✅ Neon cloud connected · ${n} photo${n === 1 ? '' : 's'} stored`);
+      runCloudSync();
+    } catch (e) { toast('❌ Neon link failed: ' + String(e?.message || e).slice(0, 80)); }
     setTesting(false);
   }
 
@@ -71,6 +95,12 @@ export default function Settings({ back, toast }) {
               <Button onClick={saveGemini} disabled={testing || !gkey}>{testing ? '…' : 'Save'}</Button>
             </div>
             {p.geminiKey && <div className="tiny ok-text">● Connected — photos are read automatically</div>}
+            <p className="small muted" style={{ marginTop: 14 }}><b>Backup AI — Groq (free):</b> used automatically whenever Google is busy. Go to <b>console.groq.com/keys</b>, sign in with Google, tap <b>Create API Key</b>, copy and paste here.</p>
+            <div className="row gap">
+              <input className="input grow" type="password" placeholder="gsk_…" value={qkey} onChange={(e) => setQkey(e.target.value)} />
+              <Button onClick={saveGroq} disabled={testing || !qkey}>{testing ? '…' : 'Save'}</Button>
+            </div>
+            {p.groqKey && <div className="tiny ok-text">● Groq backup on — if Gemini is busy, Groq reads the photo</div>}
           </>
         )}
 
@@ -144,6 +174,21 @@ export default function Settings({ back, toast }) {
           <Pill color="#2ed573">🌱 Vegetarian</Pill><Pill color="#74b9ff">🚭 Non-smoker</Pill><Pill color="#a29bfe">🚫🍺 Non-alcoholic</Pill>
         </div>
         <p className="tiny muted">Non-veg mode will arrive in a future version — the data model already supports it.</p>
+      </Card>
+
+      <Card glow="#00d9f5">
+        <h3>☁️ Photo cloud (Neon)</h3>
+        <p className="small muted">Every food photo is uploaded to your free Neon database. The phone keeps only small previews, and the photos show on any phone where you paste the same link.</p>
+        <ol className="list tiny muted">
+          <li>Open <b>console.neon.tech</b> → project <b>vegvital</b></li>
+          <li>Tap <b>Connect</b> → copy the connection string (starts with <b>postgresql://</b>)</li>
+          <li>Paste it here and tap Save</li>
+        </ol>
+        <div className="row gap">
+          <input className="input grow" type="password" placeholder="postgresql://…neon.tech/neondb?sslmode=require" value={nurl} onChange={(e) => setNurl(e.target.value)} />
+          <Button onClick={saveNeon} disabled={testing || !nurl}>{testing ? '…' : 'Save'}</Button>
+        </div>
+        {p.neonUrl && <div className="tiny ok-text">● Connected — photos upload automatically</div>}
       </Card>
 
       <Card glow="#ffd166">

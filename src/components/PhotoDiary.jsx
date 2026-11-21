@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useStore, todayKey } from '../lib/store.js';
 import { importGalleryPhotos, processPending } from '../lib/pending.js';
-import { usePhoto, deleteDiary } from '../lib/photos.js';
+import { usePhoto, deleteDiary, runCloudSync } from '../lib/photos.js';
+import { pullDay, cloudOn } from '../lib/cloud.js';
 import { MEAL_SLOTS } from '../data/plan.js';
 import { Card, Sheet, Button, tap } from './ui.jsx';
 import { fmtTime } from '../lib/calc.js';
@@ -10,11 +11,12 @@ import { fmtTime } from '../lib/calc.js';
 const BADGE = { done: '✅', logged: '✅', waiting: '⏳', notfood: '🚫' };
 
 function Thumb({ p, onOpen }) {
-  const src = usePhoto(p.id);
+  const src = usePhoto(p.id, { thumb: true });
   return (
     <motion.button className="pd-thumb" whileTap={{ scale: 0.92 }} onClick={() => { tap(); onOpen(p); }}>
       {src ? <img src={src} alt="" /> : <span className="pd-ph">🍽</span>}
       <i className={`pd-badge ${p.status}`}>{BADGE[p.status] || '⏳'}</i>
+      {p.cloud && <i className="pd-cloud">☁️</i>}
       <small>{p.kcal ? `${p.kcal} kcal` : MEAL_SLOTS.find((s) => s.key === p.slot)?.label}</small>
     </motion.button>
   );
@@ -26,6 +28,10 @@ export default function PhotoDiary({ dayKey = todayKey(), toast, compact }) {
   const waiting = useStore((s) => (s.pending || []).filter((p) => p.photoId).length);
   const lastErr = useStore((s) => (s.pending || []).find((p) => p.lastErr)?.lastErr);
   const [open, setOpen] = useState(null);
+  const cloud = useStore((s) => !!(s.profile.neonUrl || '').trim());
+  const cloudErr = useStore((s) => s.cloudErr);
+  const unsynced = list.filter((p) => !p.cloud).length;
+  useEffect(() => { if (cloud) { pullDay(dayKey); runCloudSync(); } }, [cloud, dayKey]);
   const [busy, setBusy] = useState(false);
   const big = usePhoto(open?.id);
 
@@ -52,6 +58,12 @@ export default function PhotoDiary({ dayKey = todayKey(), toast, compact }) {
         <div className="pd-strip">{list.map((p) => <Thumb key={p.id} p={p} onOpen={setOpen} />)}</div>
       ) : (
         <p className="tiny muted">Every photo you snap is saved here. Took pictures with the phone camera? Tap <b>＋ Add photos</b> and pick them all at once — the app files them under the right meal and the AI counts them automatically.</p>
+      )}
+      {!compact && (
+        <div className="tiny muted" style={{ marginTop: 6 }}>
+          {cloud ? (cloudErr ? <>☁️ Cloud upload paused: {cloudErr}</> : unsynced ? <>☁️ Uploading {unsynced} photo{unsynced > 1 ? 's' : ''} to Neon…</> : list.length ? <>☁️ All photos saved in your Neon cloud</> : null)
+            : <>☁️ Cloud storage is off — add your Neon link in Settings</>}
+        </div>
       )}
       {!compact && waiting > 0 && (
         <div className="tiny muted pd-wait">

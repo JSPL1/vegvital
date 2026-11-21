@@ -61,14 +61,14 @@ function client(apiKey) {
 // 'offline' → no AI: tap-to-pick from your plan + food chart
 export function activeProvider(profile) {
   const p = profile.aiProvider || 'gemini';
-  if (p === 'gemini' && profile.geminiKey) return 'gemini';
+  if (p === 'gemini' && (profile.geminiKey || profile.groqKey)) return 'gemini';
   if (p === 'claude' && profile.apiKey) return 'claude';
   return 'offline';
 }
 
 export async function analyzeWithProfile(profile, args) {
   const prov = activeProvider(profile);
-  if (prov === 'gemini') return analyzeGemini({ ...args, apiKey: profile.geminiKey });
+  if (prov === 'gemini') return analyzeFree(profile, args);
   if (prov === 'claude') return analyzeFoodPhoto({ ...args, apiKey: profile.apiKey });
   throw new Error('NO_KEY');
 }
@@ -96,8 +96,12 @@ let geminiGood = null;   // last model that answered
 
 async function listGeminiModels(apiKey) {
   if (geminiModels) return geminiModels;
-  const r = await fetch(`${GEMINI}/models?pageSize=200`, { headers: { 'x-goog-api-key': apiKey } });
-  if (!r.ok) throw new Error(r.status === 400 || r.status === 403 ? 'Gemini key invalid (401)' : `Gemini error ${r.status}`);
+  const FALLBACK = ['models/gemini-2.5-flash', 'models/gemini-2.5-flash-lite', 'models/gemini-2.0-flash', 'models/gemini-flash-latest'];
+  let r;
+  try { r = await fetch(`${GEMINI}/models?pageSize=200`, { headers: { 'x-goog-api-key': apiKey } }); }
+  catch { return FALLBACK; } // offline / flaky network: still try the photo
+  if (r.status === 400 || r.status === 401 || r.status === 403) throw new Error('Gemini key invalid (401)');
+  if (!r.ok) return FALLBACK; // Google busy listing models: go straight to the well-known ones (not cached)
   const { models = [] } = await r.json();
   const ok = models.filter((m) => (m.supportedGenerationMethods || []).includes('generateContent')
     && /flash/i.test(m.name) && !/(image|tts|audio|live|thinking|embedding|exp)/i.test(m.name));
@@ -237,4 +241,101 @@ export function shrinkImage(dataUrl, max = 1280) {
     img.onerror = reject;
     img.src = dataUrl;
   });
+}
+
+// ---------- Free AI chain: Gemini first, Groq as backup ----------
+async function analyzeFree(profile, args) {
+  const errs = [];
+  if (profile.geminiKey) {
+    try { return await analyzeGemini({ ...args, apiKey: profile.geminiKey }); } catch (e) { errs.push(e); }
+    if (profile.groqKey) args.onStatus?.('Google busy, asking Groq…');
+  }
+  if (profile.groqKey) {
+    try { return await analyzeGroq({ ...args, apiKey: profile.groqKey }); } catch (e) { errs.push(e); }
+  }
+  // only report "invalid key" when every key we have is invalid; otherwise it is a busy error (photo gets queued)
+  const allInvalid = errs.length && errs.every((e) => /invalid/i.test(String(e.message)));
+  if (allInvalid) throw errs[0];
+  const busy = errs.find((e) => !/invalid/i.test(String(e.message))) || errs[0];
+  const err = new Error(errs.map((e) => String(e.message)).join(' · ') || busy?.message || 'AI busy');
+  err.busy = true;
+  throw err;
+}
+
+const GROQ = 'https://api.groq.com/openai/v1';
+const GROQ_DEFAULTS = ['meta-llama/llama-4-scout-17b-16e-instruct', 'meta-llama/llama-4-maverick-17b-128e-instruct'];
+let groqModels = null, groqGood = null;
+
+async function listGroqModels(apiKey) {
+  if (groqModels) return groqModels;
+  try {
+    const r = await fetch(GROQ + '/models', { headers: { Authorization: 'Bearer ' + apiKey } });
+    if (r.status === 401) throw new Error('Groq key invalid (401)');
+    if (r.ok) {
+      const ids = ((await r.json()).data || []).filter((m) => m.active !== false).map((m) => m.id);
+      // vision-capable chat models (Llama 4, anything named vision / vl)
+      const vis = ids.filter((id) => /llama-4|vision|-vl|vl-|scout|maverick/i.test(id) && !/guard|whisper|tts/i.test(id));
+      vis.sort((a, b) => (/scout/i.test(b) ? 1 : 0) - (/scout/i.test(a) ? 1 : 0));
+      groqModels = [...new Set([...vis, ...GROQ_DEFAULTS.filter((d) => !ids.length || ids.includes(d))])];
+      if (!groqModels.length) groqModels = GROQ_DEFAULTS;
+      return groqModels;
+    }
+  } catch (e) { if (/invalid/.test(e.message)) throw e; }
+  return GROQ_DEFAULTS;
+}
+
+export async function analyzeGroq({ base64, mediaType = 'image/jpeg', apiKey, mealLabel, remainingKcal, onStatus }) {
+  const list = await listGroqModels(apiKey);
+  const order = groqGood ? [groqGood, ...list.filter((m) => m !== groqGood)] : list;
+  let lastStatus = 0, lastMsg = '';
+  const deadline = Date.now() + 15000;
+  for (const model of order) {
+    for (let attempt = 0; attempt < 2 && Date.now() < deadline; attempt++) {
+      let r;
+      try {
+        r = await fetch(GROQ + '/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + apiKey },
+          body: JSON.stringify({
+            model, temperature: 0.2, max_completion_tokens: 1500,
+            response_format: { type: 'json_object' },
+            messages: [
+              { role: 'system', content: SYSTEM + '\n\n' + JSON_SHAPE },
+              { role: 'user', content: [
+                { type: 'text', text: `This is my ${mealLabel || 'meal'}. I have about ${Math.round(remainingKcal ?? 0)} kcal left for today. Analyse it and reply with JSON only.` },
+                { type: 'image_url', image_url: { url: `data:${mediaType};base64,${base64}` } },
+              ] },
+            ],
+          }),
+        });
+      } catch { throw new Error('Failed to fetch'); }
+      if (r.ok) {
+        const j = await r.json();
+        const text = j.choices?.[0]?.message?.content || '';
+        const clean = text.replace(/^```(json)?/i, '').replace(/```$/, '').trim();
+        const m = clean.match(/\{[\s\S]*\}/);
+        if (!m) break;
+        groqGood = model;
+        return normalise(JSON.parse(m[0]));
+      }
+      lastStatus = r.status;
+      try { lastMsg = (await r.json())?.error?.message || ''; } catch { lastMsg = ''; }
+      if (r.status === 401 || r.status === 403) throw new Error('Groq key invalid (401)');
+      if (r.status === 404 || r.status === 400) break; // model retired / no vision → next one
+      if ([429, 500, 502, 503, 504].includes(r.status)) { onStatus?.('Groq busy, retrying…'); await wait(1500 * (attempt + 1)); continue; }
+      break;
+    }
+    if (Date.now() >= deadline) break;
+  }
+  const err = new Error(`Groq busy${lastStatus ? ` (${lastStatus}${lastMsg ? ': ' + lastMsg.slice(0, 100) : ''})` : ''}`);
+  err.busy = true;
+  throw err;
+}
+
+export async function testGroqKey(apiKey) {
+  const r = await fetch(GROQ + '/models', { headers: { Authorization: 'Bearer ' + apiKey } });
+  if (r.status === 401 || r.status === 403) throw new Error('Groq key invalid');
+  if (!r.ok) throw new Error('Groq error ' + r.status);
+  groqModels = null;
+  return (await listGroqModels(apiKey))[0];
 }
