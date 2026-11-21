@@ -4,6 +4,7 @@ import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
 import { Capacitor } from '@capacitor/core';
 import { useStore, updateDay, getState, getDay } from '../lib/store.js';
 import { analyzeWithProfile, activeProvider, shrinkImage } from '../lib/ai.js';
+import { queuePhoto } from '../lib/pending.js';
 import { dayTotals, burned } from '../lib/calc.js';
 import { MEAL_SLOTS, planForDate } from '../data/plan.js';
 import { sumNutrition, FOODS, healthScore } from '../data/foods.js';
@@ -30,6 +31,8 @@ export default function Scan({ onClose, initialSlot, go }) {
   const [msg, setMsg] = useState(0);
   const [busyNote, setBusyNote] = useState('');
   const lastB64 = useRef(null);
+  const smallB64 = useRef(null);
+  const [pendingId, setPendingId] = useState(null);
 
   useEffect(() => { if (stage !== 'analyzing') return; const t = setInterval(() => setMsg((m) => (m + 1) % MSGS.length), 1600); return () => clearInterval(t); }, [stage]);
   useEffect(() => { if (Capacitor.isNativePlatform()) capture(CameraSource.Camera); }, []);
@@ -47,6 +50,7 @@ export default function Scan({ onClose, initialSlot, go }) {
       const small = await shrinkImage(dataUrl);
       setImg(small.dataUrl);
       lastB64.current = small.base64;
+      try { smallB64.current = (await shrinkImage(dataUrl, 768)).base64; } catch { smallB64.current = small.base64; }
       run(small.base64);
     } catch (e) {
       if (String(e?.message || e).toLowerCase().includes('cancel')) return;
@@ -67,6 +71,14 @@ export default function Scan({ onClose, initialSlot, go }) {
       setRes(r); setStage('result');
     } catch (e) {
       const m = String(e?.message || e);
+      const keyBad = m.includes('401') || m.includes('authentication') || m.includes('invalid');
+      if (!keyBad) {
+        // never block logging: save the photo for automatic re-analysis and let the user quick-pick now
+        if (!pendingId) setPendingId(queuePhoto({ base64: smallB64.current || base64, slot }));
+        setErr(m);
+        setStage('pick');
+        return;
+      }
       setErr(m.includes('401') || m.includes('authentication') ? 'Your AI key looks invalid. Check it in Settings.' : m.includes('Failed to fetch') || m.includes('Connection') ? 'No internet connection. Try again when online.' : m);
       setStage('error');
     }
@@ -76,7 +88,7 @@ export default function Scan({ onClose, initialSlot, go }) {
     tap();
     updateDay((d) => {
       const meals = { ...d.meals };
-      meals[slot] = { items: res.items, source: 'photo', time: new Date().toISOString(), name: res.meal_name, score: res.health_score };
+      meals[slot] = { items: res.items, source: res.quick ? 'quick-pick' : 'photo', time: new Date().toISOString(), name: res.meal_name, score: res.health_score, ...(res.quick && pendingId ? { pendingId } : {}) };
       return { ...d, meals };
     });
     onClose(true);
@@ -133,7 +145,7 @@ export default function Scan({ onClose, initialSlot, go }) {
         )}
 
         {stage === 'pick' && (
-          <QuickPick key="q" slot={slot} onDone={(r) => { setRes(r); setStage('result'); }}
+          <QuickPick key="q" slot={slot} queued={!!pendingId} reason={err} onDone={(r) => { setRes(r); setStage('result'); }}
             onSetup={() => { onClose(false); go('settings'); }} />
         )}
 
@@ -188,15 +200,20 @@ export default function Scan({ onClose, initialSlot, go }) {
   );
 }
 
+const EXTRA_IDS = ['steamed_veg_bowl', 'steamed_veg_small', 'salad', 'onion_raw', 'oil_tsp'];
+const SNACK = ['Snack', 'Fruit', 'Drinks', 'Breakfast', 'Sweets', 'Dairy'];
+const MAIN = ['Dal', 'Sabzi', 'Grains', 'Protein', 'Dairy', 'Snack'];
+const CAT_ORDER = { pre: ['Nuts', 'Drinks', 'Fruit'], breakfast: ['Breakfast', 'Dairy', 'Protein', 'Fruit', 'Drinks'], msnack: SNACK, lunch: MAIN, esnack: SNACK, dinner: MAIN, post: ['Dairy', 'Drinks', 'Fruit', 'Sweets'] };
+
 // Free, offline: tap what's on the plate (your plan's items for this meal come first).
-function QuickPick({ slot, onDone, onSetup }) {
+function QuickPick({ slot, onDone, onSetup, queued, reason }) {
   const [q, setQ] = useState('');
   const [picked, setPicked] = useState([]);
   const planned = planForDate().meals[slot]?.items || [];
   const plannedIds = new Set(planned.map((i) => i.id));
   const list = q
     ? FOODS.filter((f) => f.name.toLowerCase().includes(q.toLowerCase())).slice(0, 24)
-    : [...planned, ...FOODS.filter((f) => !plannedIds.has(f.id) && ['steamed_veg_bowl', 'steamed_veg_small', 'salad', 'oil_tsp'].includes(f.id)), ...FOODS.filter((f) => !plannedIds.has(f.id) && ['Breakfast', 'Dal', 'Sabzi', 'Grains', 'Snack', 'Protein'].includes(f.cat)).slice(0, 18)];
+    : [...planned, ...FOODS.filter((f) => !plannedIds.has(f.id) && EXTRA_IDS.includes(f.id)), ...FOODS.filter((f) => !plannedIds.has(f.id) && !EXTRA_IDS.includes(f.id) && CAT_ORDER[slot].includes(f.cat)).sort((x, y) => CAT_ORDER[slot].indexOf(x.cat) - CAT_ORDER[slot].indexOf(y.cat)).slice(0, 36)];
   const toggle = (f) => { tap(); setPicked((p) => (p.some((x) => x.id === f.id) ? p.filter((x) => x.id !== f.id) : [...p, f])); };
   const done = () => {
     const items = picked.map((f) => ({ ...f, id: 'qp_' + f.id, qty: 1 }));
@@ -207,11 +224,18 @@ function QuickPick({ slot, onDone, onSetup }) {
       health_score: score,
       verdict: score >= 7 ? 'Balanced, protein-smart choice 👍' : score >= 4 ? 'Okay — could use more protein or veggies' : 'Heavy meal — keep the next one light',
       tip: n.p < 15 ? 'Add curd, paneer, dal or sprouts for protein.' : n.fb < 5 ? 'Add a salad or sabzi for fibre.' : 'Great — remember a glass of water.',
-      contains_non_veg: false, contains_alcohol: false,
+      contains_non_veg: false, contains_alcohol: false, quick: true,
     });
   };
   return (
     <motion.div className="scan-panel result col gap" initial={{ y: 40, opacity: 0 }} animate={{ y: 0, opacity: 1 }}>
+      {queued && (
+        <div className="queued">
+          <b className="small">📶 Google AI is busy — your photo is saved</b>
+          <div className="tiny muted">Log it now with a quick pick. The photo is re-checked automatically in the background and the exact AI numbers will replace this estimate.</div>
+          {reason && <div className="tiny muted" style={{ opacity: 0.6, marginTop: 4 }}>{reason}</div>}
+        </div>
+      )}
       <div className="row-between"><b>👆 Tap what’s on your plate</b><span className="tiny muted">free · offline</span></div>
       <div className="search"><span>🔎</span><input placeholder="Search foods…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
       <div className="pick-grid">

@@ -108,8 +108,8 @@ async function listGeminiModels(apiKey) {
   };
   ok.sort((x, y) => score(y.name) - score(x.name));
   const names = ok.map((m) => m.name);
-  for (const d of ['models/gemini-2.5-flash', 'models/gemini-2.5-flash-lite', 'models/gemini-2.0-flash']) if (!names.includes(d)) names.push(d);
-  geminiModels = names.slice(0, 6);
+  for (const d of ['models/gemini-2.5-flash', 'models/gemini-2.5-flash-lite', 'models/gemini-2.0-flash', 'models/gemini-2.0-flash-lite', 'models/gemini-flash-latest', 'models/gemini-flash-lite-latest']) if (!names.includes(d)) names.push(d);
+  geminiModels = names.slice(0, 8);
   return geminiModels;
 }
 
@@ -137,9 +137,10 @@ export async function analyzeGemini({ base64, mediaType = 'image/jpeg', apiKey, 
     }],
     generationConfig: { responseMimeType: 'application/json', temperature: 0.2 },
   });
-  let lastStatus = 0;
+  let lastStatus = 0, lastMsg = '';
+  const deadline = Date.now() + 12000; // never keep you waiting more than ~12 s
   for (const model of order) {
-    for (let attempt = 0; attempt < 2; attempt++) {
+    for (let attempt = 0; attempt < 2 && Date.now() < deadline; attempt++) {
       let r;
       try {
         r = await fetch(`${GEMINI}/${model}:generateContent`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey }, body });
@@ -153,18 +154,24 @@ export async function analyzeGemini({ base64, mediaType = 'image/jpeg', apiKey, 
         return normalise(JSON.parse(clean));
       }
       lastStatus = r.status;
-      if (r.status === 400 || r.status === 401 || r.status === 403) throw new Error('Gemini key invalid (401)');
-      if (r.status === 404) break; // model not available for this key → next model
+      try { const e = await r.json(); lastMsg = e?.error?.message || ''; } catch { lastMsg = ''; }
+      if (r.status === 401 || r.status === 403 || (r.status === 400 && /api key/i.test(lastMsg))) throw new Error('Gemini key invalid (401)');
+      if (r.status === 404 || r.status === 400) break; // model not usable for this key → next model
+      // free tier has no quota at all for this model → skip it straight away
+      if (r.status === 429 && /limit: 0|free_tier|quota/i.test(lastMsg) && /limit: 0/.test(lastMsg)) break;
       if ([429, 500, 502, 503, 504].includes(r.status)) {
-        onStatus?.(r.status === 429 ? 'Free limit busy, retrying…' : 'Google is busy, retrying…');
-        await wait(1200 * (attempt + 1));
+        onStatus?.(r.status === 429 ? 'Free limit busy, retrying…' : `Google is busy, trying ${model.replace('models/', '')}…`);
+        await wait(1500 * (attempt + 1));
         continue;
       }
       break;
     }
+    if (Date.now() >= deadline) break;
   }
-  if (lastStatus === 429) throw new Error('Free Gemini limit reached for now — wait a minute and retry, or use Quick-pick.');
-  throw new Error('Google AI is very busy right now. Tap Retake in a minute, or use Quick-pick.');
+  const detail = lastMsg ? ` (${lastStatus}: ${lastMsg.slice(0, 120)})` : lastStatus ? ` (${lastStatus})` : '';
+  const err = new Error((lastStatus === 429 ? 'Free Gemini limit reached for now.' : 'Google AI is busy right now.') + detail);
+  err.busy = true;
+  throw err;
 }
 
 export async function testGeminiKey(apiKey) {

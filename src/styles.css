@@ -330,3 +330,4 @@ main { position: relative; }
 .backup-row { display: flex; align-items: center; gap: 10px; }
 .restore-link { margin-top: 14px; font-size: 14px; color: var(--muted); text-align: center; }
 .restore-link b { color: #00f5a0; }
+.queued { background: rgba(255,209,102,.08); border: 1px solid rgba(255,209,102,.35); border-radius: 14px; padding: 10px 12px; }

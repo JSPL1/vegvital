@@ -20,6 +20,7 @@ const TABS = [
 
 export default function App() {
   const onboarded = useStore((s) => s.onboarded);
+  const pendingDone = useStore((s) => s.pendingDone);
   const [tab, setTab] = useState('home');
   const [prev, setPrev] = useState('home');
   const [scan, setScan] = useState(null); // null | {slot}
@@ -28,6 +29,7 @@ export default function App() {
   const [party, setParty] = useState(false);
 
   useEffect(() => { startAutomation(); }, []);
+  useEffect(() => { if (pendingDone) setToast(`✨ AI updated ${pendingDone.count} meal${pendingDone.count > 1 ? 's' : ''} from your saved photo${pendingDone.count > 1 ? 's' : ''}`); }, [pendingDone?.at]);
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(''), 2800); return () => clearTimeout(t); }, [toast]);
 
   const go = (t, arg) => {

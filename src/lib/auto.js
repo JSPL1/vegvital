@@ -11,6 +11,7 @@ import { App } from '@capacitor/app';
 import { Health } from '@capgo/capacitor-health';
 import { getState, setState, updateDay, todayKey, getDay } from './store.js';
 import { planForDate, MEAL_SLOTS } from '../data/plan.js';
+import { processPending } from './pending.js';
 
 const native = Capacitor.isNativePlatform();
 // Everything your smartwatch / Samsung Health / Google Fit / Fitbit puts into Health Connect
@@ -331,9 +332,12 @@ export async function startAutomation() {
   scheduleReminders();
   setInterval(() => { autoLogPlannedMeals(); markActive(); writeBack(); }, 60000);
   setInterval(syncHealth, 3 * 60000);
+  setTimeout(processPending, 8000);
+  setInterval(processPending, 3 * 60000);
+  if (typeof window !== 'undefined') window.addEventListener('online', () => processPending());
   try {
     App.addListener('appStateChange', ({ isActive }) => {
-      if (isActive) { inferSleepFromInactivity(); autoLogPlannedMeals(); syncHealth(); }
+      if (isActive) { inferSleepFromInactivity(); autoLogPlannedMeals(); syncHealth(); processPending(); }
       markActive();
     });
   } catch { /* web */ }

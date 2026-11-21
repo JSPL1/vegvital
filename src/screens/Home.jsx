@@ -156,6 +156,7 @@ export default function Home({ go, openScan }) {
               </div>
               <div className="tiny b">{Math.round(kcal)}</div>
               {logged?.source === 'photo' && <span className="tiny">📸</span>}
+              {logged?.pendingId && <span className="tiny" title="AI will refine this">⏳</span>}
             </motion.div>
           );
         })}
