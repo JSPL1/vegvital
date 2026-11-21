@@ -55,7 +55,12 @@ export default function Settings({ back, toast }) {
       updateProfile({ neonUrl: u });
       toast(`✅ Neon cloud connected · ${n} photo${n === 1 ? '' : 's'} stored`);
       runCloudSync();
-    } catch (e) { toast('❌ Neon link failed: ' + String(e?.message || e).slice(0, 80)); }
+    } catch (e) {
+      const m = String(e?.message || e);
+      toast(/fetch|network/i.test(m)
+        ? '❌ Your network is blocking Neon (Jio DNS). Phone Settings → Private DNS → dns.google, then Save again.'
+        : '❌ Neon link failed: ' + m.slice(0, 80));
+    }
     setTesting(false);
   }
 

@@ -61,7 +61,7 @@ export default function PhotoDiary({ dayKey = todayKey(), toast, compact }) {
       )}
       {!compact && (
         <div className="tiny muted" style={{ marginTop: 6 }}>
-          {cloud ? (cloudErr ? <>☁️ Cloud upload paused: {cloudErr}</> : unsynced ? <>☁️ Uploading {unsynced} photo{unsynced > 1 ? 's' : ''} to Neon…</> : list.length ? <>☁️ All photos saved in your Neon cloud</> : null)
+          {cloud ? (cloudErr ? <>☁️ Cloud upload paused: {/fetch/i.test(cloudErr) ? "network blocks Neon — set Private DNS to dns.google" : cloudErr}</> : unsynced ? <>☁️ Uploading {unsynced} photo{unsynced > 1 ? 's' : ''} to Neon…</> : list.length ? <>☁️ All photos saved in your Neon cloud</> : null)
             : <>☁️ Cloud storage is off — add your Neon link in Settings</>}
         </div>
       )}
