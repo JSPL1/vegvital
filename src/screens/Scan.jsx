@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
 import { Capacitor } from '@capacitor/core';
@@ -28,6 +28,8 @@ export default function Scan({ onClose, initialSlot, go }) {
   const [err, setErr] = useState('');
   const [slot, setSlot] = useState(initialSlot || guessSlot());
   const [msg, setMsg] = useState(0);
+  const [busyNote, setBusyNote] = useState('');
+  const lastB64 = useRef(null);
 
   useEffect(() => { if (stage !== 'analyzing') return; const t = setInterval(() => setMsg((m) => (m + 1) % MSGS.length), 1600); return () => clearInterval(t); }, [stage]);
   useEffect(() => { if (Capacitor.isNativePlatform()) capture(CameraSource.Camera); }, []);
@@ -44,6 +46,7 @@ export default function Scan({ onClose, initialSlot, go }) {
       if (!dataUrl) return;
       const small = await shrinkImage(dataUrl);
       setImg(small.dataUrl);
+      lastB64.current = small.base64;
       run(small.base64);
     } catch (e) {
       if (String(e?.message || e).toLowerCase().includes('cancel')) return;
@@ -53,13 +56,13 @@ export default function Scan({ onClose, initialSlot, go }) {
 
   async function run(base64) {
     if (provider === 'offline') { setStage('pick'); return; }
-    setStage('analyzing');
+    setStage('analyzing'); setBusyNote('');
     try {
       const p = getState().profile;
       const d = getDay();
       const remaining = p.targetKcal - dayTotals(d).kcal + burned(d, p.weightKg);
       const label = MEAL_SLOTS.find((s) => s.key === slot)?.label;
-      const r = await analyzeWithProfile(p, { base64, mealLabel: label, remainingKcal: remaining });
+      const r = await analyzeWithProfile(p, { base64, mealLabel: label, remainingKcal: remaining, onStatus: setBusyNote });
       if (!r.is_food) { setErr('No food found in that photo. Try again with the plate in frame.'); setStage('error'); return; }
       setRes(r); setStage('result');
     } catch (e) {
@@ -117,7 +120,7 @@ export default function Scan({ onClose, initialSlot, go }) {
           <motion.div key="a" className="scan-panel center col" initial={{ y: 40, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ opacity: 0 }}>
             <div className="loader"><span /><span /><span /></div>
             <AnimatePresence mode="wait">
-              <motion.p key={msg} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="small">{MSGS[msg]}</motion.p>
+              <motion.p key={msg} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="small">{busyNote || MSGS[msg]}</motion.p>
             </AnimatePresence>
           </motion.div>
         )}
@@ -138,7 +141,7 @@ export default function Scan({ onClose, initialSlot, go }) {
           <motion.div key="e" className="scan-panel col gap" initial={{ y: 40, opacity: 0 }} animate={{ y: 0, opacity: 1 }}>
             <b>😕 Couldn’t analyse</b>
             <p className="small muted">{err}</p>
-            <div className="row gap wrap"><Button className="grow" onClick={() => capture(CameraSource.Camera)}>Retake</Button><Button variant="ghost" onClick={() => setStage('pick')}>👆 Quick-pick</Button><Button variant="ghost" onClick={() => onClose(false)}>Close</Button></div>
+            <div className="row gap wrap">{lastB64.current && <Button className="grow" onClick={() => run(lastB64.current)}>🔁 Try again</Button>}<Button variant={lastB64.current ? 'ghost' : 'primary'} onClick={() => capture(CameraSource.Camera)}>📸 Retake</Button><Button variant="ghost" onClick={() => setStage('pick')}>👆 Quick-pick</Button><Button variant="ghost" onClick={() => onClose(false)}>Close</Button></div>
           </motion.div>
         )}
 
@@ -193,7 +196,7 @@ function QuickPick({ slot, onDone, onSetup }) {
   const plannedIds = new Set(planned.map((i) => i.id));
   const list = q
     ? FOODS.filter((f) => f.name.toLowerCase().includes(q.toLowerCase())).slice(0, 24)
-    : [...planned, ...FOODS.filter((f) => !plannedIds.has(f.id) && ['Breakfast', 'Dal', 'Sabzi', 'Grains', 'Snack', 'Protein'].includes(f.cat)).slice(0, 18)];
+    : [...planned, ...FOODS.filter((f) => !plannedIds.has(f.id) && ['steamed_veg_bowl', 'steamed_veg_small', 'salad', 'oil_tsp'].includes(f.id)), ...FOODS.filter((f) => !plannedIds.has(f.id) && ['Breakfast', 'Dal', 'Sabzi', 'Grains', 'Snack', 'Protein'].includes(f.cat)).slice(0, 18)];
   const toggle = (f) => { tap(); setPicked((p) => (p.some((x) => x.id === f.id) ? p.filter((x) => x.id !== f.id) : [...p, f])); };
   const done = () => {
     const items = picked.map((f) => ({ ...f, id: 'qp_' + f.id, qty: 1 }));

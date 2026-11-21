@@ -91,32 +91,42 @@ function normalise(data) {
 
 // ---------- Google Gemini (free tier) ----------
 const GEMINI = 'https://generativelanguage.googleapis.com/v1beta';
-let geminiModel = null;
+let geminiModels = null; // ranked candidates, best first
+let geminiGood = null;   // last model that answered
 
-async function pickGeminiModel(apiKey) {
-  if (geminiModel) return geminiModel;
+async function listGeminiModels(apiKey) {
+  if (geminiModels) return geminiModels;
   const r = await fetch(`${GEMINI}/models?pageSize=200`, { headers: { 'x-goog-api-key': apiKey } });
   if (!r.ok) throw new Error(r.status === 400 || r.status === 403 ? 'Gemini key invalid (401)' : `Gemini error ${r.status}`);
   const { models = [] } = await r.json();
   const ok = models.filter((m) => (m.supportedGenerationMethods || []).includes('generateContent')
-    && /flash/i.test(m.name) && !/(image|tts|audio|live|thinking-exp|embedding)/i.test(m.name));
-  // prefer the newest stable "flash" model (not lite, not preview), then any flash
+    && /flash/i.test(m.name) && !/(image|tts|audio|live|thinking|embedding|exp)/i.test(m.name));
+  // Stable models first (preview models are often overloaded → 503), newest first, "lite" last
   const score = (n) => {
     const v = parseFloat((n.match(/gemini-(\d+(\.\d+)?)/) || [])[1] || 0);
-    return v * 10 + (/lite/.test(n) ? -3 : 0) + (/preview|exp/.test(n) ? -2 : 0) + (/latest/.test(n) ? 1 : 0);
+    return (/preview/.test(n) ? 0 : 1000) + v * 10 + (/lite/.test(n) ? -5 : 0) + (/latest/.test(n) ? 1 : 0);
   };
-  ok.sort((a, b) => score(b.name) - score(a.name));
-  geminiModel = (ok[0]?.name || 'models/gemini-2.5-flash');
-  return geminiModel;
+  ok.sort((x, y) => score(y.name) - score(x.name));
+  const names = ok.map((m) => m.name);
+  for (const d of ['models/gemini-2.5-flash', 'models/gemini-2.5-flash-lite', 'models/gemini-2.0-flash']) if (!names.includes(d)) names.push(d);
+  geminiModels = names.slice(0, 6);
+  return geminiModels;
 }
 
 const JSON_SHAPE = `Reply ONLY with JSON of this exact shape:
 {"is_food":true,"meal_name":"","items":[{"name":"","emoji":"","portion":"","grams":0,"kcal":0,"protein_g":0,"carbs_g":0,"fat_g":0,"fiber_g":0,"confidence":0.0}],
 "health_score":1-10,"verdict":"one short line","tip":"one actionable tip","contains_non_veg":false,"contains_alcohol":false}`;
 
-export async function analyzeGemini({ base64, mediaType = 'image/jpeg', apiKey, mealLabel, remainingKcal }) {
-  const model = await pickGeminiModel(apiKey);
-  const body = {
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Tries the best model; on "busy" errors (503/500/429) retries with backoff and then
+ * falls back to the next model, so a temporarily overloaded model never blocks you.
+ */
+export async function analyzeGemini({ base64, mediaType = 'image/jpeg', apiKey, mealLabel, remainingKcal, onStatus }) {
+  const list = await listGeminiModels(apiKey);
+  const order = geminiGood ? [geminiGood, ...list.filter((m) => m !== geminiGood)] : list;
+  const body = JSON.stringify({
     systemInstruction: { parts: [{ text: SYSTEM + '\n\n' + JSON_SHAPE }] },
     contents: [{
       role: 'user',
@@ -126,23 +136,41 @@ export async function analyzeGemini({ base64, mediaType = 'image/jpeg', apiKey, 
       ],
     }],
     generationConfig: { responseMimeType: 'application/json', temperature: 0.2 },
-  };
-  const r = await fetch(`${GEMINI}/${model}:generateContent`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-    body: JSON.stringify(body),
   });
-  if (r.status === 429) throw new Error('Free Gemini limit reached for now — try again in a minute (or use quick-pick).');
-  if (!r.ok) throw new Error(r.status === 400 || r.status === 403 ? 'Gemini key invalid (401)' : `Gemini error ${r.status}`);
-  const j = await r.json();
-  const text = (j.candidates?.[0]?.content?.parts || []).map((p) => p.text || '').join('');
-  const clean = text.replace(/^```(json)?/i, '').replace(/```$/, '').trim();
-  return normalise(JSON.parse(clean));
+  let lastStatus = 0;
+  for (const model of order) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      let r;
+      try {
+        r = await fetch(`${GEMINI}/${model}:generateContent`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey }, body });
+      } catch (e) { throw new Error('Failed to fetch'); }
+      if (r.ok) {
+        const j = await r.json();
+        const text = (j.candidates?.[0]?.content?.parts || []).map((p) => p.text || '').join('');
+        const clean = text.replace(/^```(json)?/i, '').replace(/```$/, '').trim();
+        if (!clean) break; // empty/blocked answer → try next model
+        geminiGood = model;
+        return normalise(JSON.parse(clean));
+      }
+      lastStatus = r.status;
+      if (r.status === 400 || r.status === 401 || r.status === 403) throw new Error('Gemini key invalid (401)');
+      if (r.status === 404) break; // model not available for this key → next model
+      if ([429, 500, 502, 503, 504].includes(r.status)) {
+        onStatus?.(r.status === 429 ? 'Free limit busy, retrying…' : 'Google is busy, retrying…');
+        await wait(1200 * (attempt + 1));
+        continue;
+      }
+      break;
+    }
+  }
+  if (lastStatus === 429) throw new Error('Free Gemini limit reached for now — wait a minute and retry, or use Quick-pick.');
+  throw new Error('Google AI is very busy right now. Tap Retake in a minute, or use Quick-pick.');
 }
 
 export async function testGeminiKey(apiKey) {
-  geminiModel = null;
-  return pickGeminiModel(apiKey);
+  geminiModels = null; geminiGood = null;
+  const list = await listGeminiModels(apiKey);
+  return list[0];
 }
 
 // ---------- Anthropic Claude (paid) ----------
