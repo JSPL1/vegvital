@@ -17,8 +17,9 @@ export default function Move({ startId, clearStart }) {
   useEffect(() => { if (startId) { setActive(PROGRAMS.find((p) => p.id === startId)); clearStart?.(); } }, [startId]);
   const todays = WEEK_SCHEDULE[new Date().getDay()];
   const doneIds = new Set(day.workouts.map((w) => w.id));
-  const totalMins = day.workouts.reduce((a, w) => a + w.mins, 0);
-  const totalKcal = day.workouts.reduce((a, w) => a + w.kcal, 0);
+  const watchW = day.watchWorkouts || [];
+  const totalMins = [...day.workouts, ...watchW].reduce((a, w) => a + w.mins, 0);
+  const totalKcal = [...day.workouts, ...watchW].reduce((a, w) => a + (w.kcal || 0), 0);
 
   useEffect(() => {
     const keys = ['squat', 'jumping_jack', 'pushup', 'lunge', 'surya', 'burpee', 'glute_bridge', 'tree'];
@@ -39,7 +40,7 @@ export default function Move({ startId, clearStart }) {
           <div className="row gap" style={{ marginTop: 10 }}>
             <div><div className="tiny muted">Steps</div><b><CountUp value={day.steps || 0} /></b></div>
             <div><div className="tiny muted">Desk breaks</div><b>{day.breaks || 0}</b></div>
-            <div><div className="tiny muted">Sessions</div><b>{day.workouts.length}</b></div>
+            <div><div className="tiny muted">Sessions</div><b>{day.workouts.length + watchW.length}</b></div>
           </div>
         </div>
         <div className="preview-fig">
@@ -51,6 +52,20 @@ export default function Move({ startId, clearStart }) {
           <div className="tiny muted center-text">{EXERCISES[preview].name}</div>
         </div>
       </Card>
+
+      {(watchW.length > 0 || day.workouts.length > 0) && (
+        <Card>
+          <h3>Today’s sessions</h3>
+          {[...watchW.map((w) => ({ ...w, src: "⌚ " + w.source })), ...day.workouts.map((w) => ({ ...w, src: "📱 VegVital" }))]
+            .sort((x, y) => new Date(x.time) - new Date(y.time))
+            .map((w, i) => (
+              <motion.div key={w.time + i} className="session" initial={{ opacity: 0, x: -14 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.05 }}>
+                <div className="grow"><b className="small">{w.title}</b><div className="tiny muted">{new Date(w.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} · {w.src}</div></div>
+                <span className="tiny">⏱ {w.mins}m</span>{w.km ? <span className="tiny">📍 {w.km}km</span> : null}<b className="tiny">🔥 {w.kcal}</b>
+              </motion.div>
+            ))}
+        </Card>
+      )}
 
       <motion.h3 variants={rise} className="section">Suggested for today</motion.h3>
       {PROGRAMS.filter((p) => todays.includes(p.id)).map((p) => <ProgramCard key={p.id} p={p} kg={profile.weightKg} done={doneIds.has(p.id)} onStart={() => setActive(p)} />)}

@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useStore, updateDay, todayKey, emptyDay } from '../lib/store.js';
 import { dayTotals, burned, proteinGoal, dayScore, fmtH, fmtTime } from '../lib/calc.js';
 import { MEAL_SLOTS, planForDate, DAILY_RULES } from '../data/plan.js';
+import WatchCard from '../components/WatchCard.jsx';
 import { Ring, CountUp, Card, Bar, stagger, rise, WaterGlass, Sheet, Button, Pill, tap, useNow } from '../components/ui.jsx';
 
 const toMin = (t) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
@@ -136,6 +137,8 @@ export default function Home({ go, openScan }) {
           <div className="tiny muted" style={{ marginTop: 6 }}>{breaksDue > (day.breaks || 0) ? '⚠️ Time to stand & stretch' : '✅ Posture on track'}</div>
         </Card>
       </div>
+
+      <WatchCard />
 
       {/* TIMELINE */}
       <Card className="timeline">

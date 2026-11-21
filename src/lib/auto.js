@@ -13,7 +13,18 @@ import { getState, setState, updateDay, todayKey, getDay } from './store.js';
 import { planForDate, MEAL_SLOTS } from '../data/plan.js';
 
 const native = Capacitor.isNativePlatform();
-const READ = ['steps', 'sleep', 'calories', 'heartRate', 'weight'];
+// Everything your smartwatch / Samsung Health / Google Fit / Fitbit puts into Health Connect
+const READ = ['steps', 'sleep', 'calories', 'totalCalories', 'heartRate', 'restingHeartRate', 'oxygenSaturation',
+  'heartRateVariability', 'weight', 'workouts', 'dietaryWater', 'distance'];
+// What VegVital writes back so your watch app shows it too
+const WRITE = ['calories', 'dietaryWater', 'dietaryEnergyConsumed', 'dietaryProtein', 'mindfulness'];
+
+const WORKOUT_NAMES = {
+  walking: 'Walk 🚶', running: 'Run 🏃', runningTreadmill: 'Treadmill 🏃', cycling: 'Cycling 🚴', bikingStationary: 'Indoor bike 🚴',
+  yoga: 'Yoga 🧘', swimming: 'Swim 🏊', swimmingPool: 'Swim 🏊', strengthTraining: 'Strength 💪', traditionalStrengthTraining: 'Strength 💪',
+  functionalStrengthTraining: 'Strength 💪', highIntensityIntervalTraining: 'HIIT 🔥', hiking: 'Hike 🥾', elliptical: 'Elliptical',
+  dance: 'Dance 💃', badminton: 'Badminton 🏸', cricket: 'Cricket 🏏', stairClimbing: 'Stairs', other: 'Workout',
+};
 
 const toMin = (hhmm) => { const [h, m] = hhmm.split(':').map(Number); return h * 60 + m; };
 const nowMin = () => { const d = new Date(); return d.getHours() * 60 + d.getMinutes(); };
@@ -27,8 +38,8 @@ export async function healthAvailable() {
 export async function connectHealth() {
   if (!(await healthAvailable())) return { ok: false, reason: 'Health Connect not available on this phone' };
   try {
-    const r = await Health.requestAuthorization({ read: READ, write: [] });
-    setState({ healthConnected: r.readAuthorized.includes('steps') });
+    const r = await Health.requestAuthorization({ read: READ, write: WRITE });
+    setState({ healthConnected: r.readAuthorized.length > 0, healthWrite: r.writeAuthorized || [] });
     await syncHealth();
     return { ok: r.readAuthorized.length > 0 };
   } catch (e) {
@@ -72,7 +83,132 @@ export async function syncHealth() {
       setState({ weights });
     }
   } catch { /* ignore */ }
+
+  // ---- smartwatch vitals ----
+  const vitals = {};
+  let device = getState().watch?.device || null;
+  try {
+    const hr = await Health.readSamples({ dataType: 'heartRate', startDate: iso(start), endDate: iso(new Date()), limit: 500, ascending: true });
+    const v = hr.samples.map((s) => s.value).filter(Boolean);
+    if (v.length) {
+      const last = hr.samples[hr.samples.length - 1];
+      vitals.hr = Math.round(last.value); vitals.hrAt = last.endDate;
+      vitals.hrMin = Math.round(Math.min(...v)); vitals.hrMax = Math.round(Math.max(...v));
+      vitals.hrAvg = Math.round(v.reduce((a, b) => a + b, 0) / v.length);
+      // hourly trend for the sparkline
+      const buckets = Array(24).fill(null);
+      hr.samples.forEach((s) => { const h = new Date(s.startDate).getHours(); buckets[h] = buckets[h] == null ? s.value : (buckets[h] + s.value) / 2; });
+      vitals.hrTrend = buckets.map((x) => (x == null ? 0 : Math.round(x)));
+      device = last.sourceName || last.deviceType || device;
+    }
+  } catch { /* no watch HR */ }
+  const latest = async (dataType, key, round = 0) => {
+    try {
+      const r = await Health.readSamples({ dataType, startDate: iso(new Date(Date.now() - 3 * 86400e3)), endDate: iso(new Date()), limit: 20 });
+      const s = r.samples.sort((a, b) => new Date(b.endDate) - new Date(a.endDate))[0];
+      if (s) { vitals[key] = +s.value.toFixed(round); device = device || s.sourceName; }
+    } catch { /* ignore */ }
+  };
+  await latest('restingHeartRate', 'rhr');
+  await latest('oxygenSaturation', 'spo2');
+  await latest('heartRateVariability', 'hrv');
+  try {
+    const d = await Health.queryAggregated({ dataType: 'distance', startDate: iso(start), endDate: iso(new Date()), bucket: 'day', aggregation: 'sum' });
+    const m = d.samples.reduce((a, s) => a + (s.value || 0), 0);
+    if (m > 0) vitals.km = +(m / 1000).toFixed(2);
+  } catch { /* ignore */ }
+  try {
+    const tc = await Health.queryAggregated({ dataType: 'totalCalories', startDate: iso(start), endDate: iso(new Date()), bucket: 'day', aggregation: 'sum' });
+    const k = tc.samples.reduce((a, s) => a + (s.value || 0), 0);
+    if (k > 0) vitals.totalKcal = Math.round(k);
+  } catch { /* ignore */ }
+
+  // ---- workouts recorded on the watch ----
+  try {
+    const w = await Health.queryWorkouts({ startDate: iso(start), endDate: iso(new Date()), limit: 30 });
+    const ours = 'VegVital';
+    const list = (w.workouts || [])
+      .filter((x) => !(x.sourceName || '').includes(ours))
+      .map((x) => ({
+        id: x.platformId || x.startDate, type: x.workoutType, title: WORKOUT_NAMES[x.workoutType] || x.workoutType,
+        mins: Math.round((x.duration || 0) / 60), kcal: Math.round(x.totalEnergyBurned || 0),
+        km: x.totalDistance ? +(x.totalDistance / 1000).toFixed(2) : 0, time: x.startDate, source: x.sourceName || 'Watch',
+      }));
+    updateDay((d) => ({ ...d, watchWorkouts: list }));
+    if (list[0]) device = device || list[0].source;
+  } catch { /* ignore */ }
+
+  // ---- water logged on the watch ----
+  try {
+    const wa = await Health.queryAggregated({ dataType: 'dietaryWater', startDate: iso(start), endDate: iso(new Date()), bucket: 'day', aggregation: 'sum' });
+    const litres = wa.samples.reduce((a, s) => a + (s.value || 0), 0);
+    const glasses = Math.round(litres / 0.25);
+    // Health Connect total already includes the glasses we wrote; if it's higher, the watch logged extra
+    if (glasses > (getDay().water || 0)) {
+      updateDay((d) => ({ ...d, water: glasses, hcWritten: { ...(d.hcWritten || {}), water: glasses } }));
+    }
+  } catch { /* ignore */ }
+
+  setState({ watch: { ...(getState().watch || {}), ...vitals, device, lastSync: new Date().toISOString() } });
+  await writeBack();
 }
+
+// ---------- write VegVital data back to Health Connect (shows on your watch app) ----------
+let writing = false;
+export async function writeBack() {
+  if (writing || !getState().healthConnected || !native) return;
+  writing = true;
+  try {
+    const r = await Health.checkAuthorization({ read: READ, write: WRITE });
+    setState({ healthWrite: r.writeAuthorized || [] });
+  } catch { /* keep last known */ }
+  const can = new Set(getState().healthWrite || []);
+  try {
+    const day = getDay();
+    const done = day.hcWritten || { water: 0, kcal: 0, p: 0, workouts: [] };
+    const now = new Date(), earlier = new Date(Date.now() - 60000);
+    const iso = (d) => d.toISOString();
+    const next = { ...done, workouts: [...(done.workouts || [])] };
+    // water: one sample for every glass not yet written
+    const dw = (day.water || 0) - (done.water || 0);
+    if (dw > 0 && can.has('dietaryWater')) {
+      await Health.saveSample({ dataType: 'dietaryWater', value: dw * 0.25, unit: 'liter', startDate: iso(earlier), endDate: iso(now) });
+      next.water = day.water;
+    }
+    // food energy + protein from everything eaten today
+    const t = dayTotalsLocal(day);
+    const dk = Math.round(t.kcal - (done.kcal || 0)), dp = Math.round(t.p - (done.p || 0));
+    if (dk > 5 && can.has('dietaryEnergyConsumed')) {
+      await Health.saveSample({ dataType: 'dietaryEnergyConsumed', value: dk, unit: 'kilocalorie', startDate: iso(earlier), endDate: iso(now) });
+      next.kcal = Math.round(t.kcal);
+    }
+    if (dp > 1 && can.has('dietaryProtein')) {
+      await Health.saveSample({ dataType: 'dietaryProtein', value: dp, unit: 'gram', startDate: iso(earlier), endDate: iso(now) });
+      next.p = Math.round(t.p);
+    }
+    // in-app workouts → active calories (and breathing sessions → mindfulness)
+    for (const w of day.workouts || []) {
+      const key = w.time;
+      if (next.workouts.includes(key)) continue;
+      const st = new Date(w.time), en = new Date(st.getTime() + w.mins * 60000);
+      const s = st < en ? st : earlier;
+      if (can.has('calories')) await Health.saveSample({ dataType: 'calories', value: w.kcal, unit: 'kilocalorie', startDate: iso(s), endDate: iso(en > now ? now : en), metadata: { source: 'VegVital', title: w.title } });
+      if ((w.id === 'sleep' || w.id === 'morning_yoga') && can.has('mindfulness')) {
+        await Health.saveSample({ dataType: 'mindfulness', value: w.mins, unit: 'minute', startDate: iso(s), endDate: iso(en > now ? now : en), mindfulnessSessionType: w.id === 'sleep' ? 'breathing' : 'movement' });
+      }
+      next.workouts.push(key);
+    }
+    updateDay((d) => ({ ...d, hcWritten: next }));
+  } catch { /* permission missing — reading still works */ }
+  writing = false;
+}
+
+function dayTotalsLocal(day) {
+  const items = [...Object.values(day.meals || {}).flatMap((m) => m.items || []), ...(day.extra || []).flatMap((e) => e.items)];
+  return items.reduce((a, it) => { const q = it.qty ?? 1; a.kcal += (it.kcal || 0) * q; a.p += (it.p || 0) * q; return a; }, { kcal: 0, p: 0 });
+}
+
+export const watchName = () => getState().watch?.device || null;
 
 // ---------- Phone pedometer fallback (while app open) ----------
 let lastPeak = 0, above = false, motionHandle = null, buffered = 0;
@@ -193,8 +329,8 @@ export async function startAutomation() {
   startPedometer();
   syncHealth();
   scheduleReminders();
-  setInterval(() => { autoLogPlannedMeals(); markActive(); }, 60000);
-  setInterval(syncHealth, 5 * 60000);
+  setInterval(() => { autoLogPlannedMeals(); markActive(); writeBack(); }, 60000);
+  setInterval(syncHealth, 3 * 60000);
   try {
     App.addListener('appStateChange', ({ isActive }) => {
       if (isActive) { inferSleepFromInactivity(); autoLogPlannedMeals(); syncHealth(); }

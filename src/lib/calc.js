@@ -13,7 +13,7 @@ export function dayTotals(day) {
 }
 
 export function burned(day, kg = 70) {
-  const workouts = (day.workouts || []).reduce((a, w) => a + w.kcal, 0);
+  const workouts = (day.workouts || []).reduce((a, w) => a + w.kcal, 0) + (day.watchWorkouts || []).reduce((a, w) => a + (w.kcal || 0), 0);
   const stepKcal = (day.steps || 0) * 0.04 * (kg / 70);
   return Math.round(Math.max(day.activeKcal || 0, workouts + stepKcal));
 }
@@ -30,7 +30,7 @@ export function dayScore(day, p) {
   const water = Math.min(1, (day.water || 0) / p.waterGoal);
   const steps = Math.min(1, (day.steps || 0) / p.stepGoal);
   const sleep = day.sleep ? Math.max(0, 1 - Math.abs(day.sleep.mins / 60 - p.sleepGoalH) / p.sleepGoalH) : 0;
-  const move = Math.min(1, (day.workouts || []).reduce((a, w) => a + w.mins, 0) / 30);
+  const move = Math.min(1, [...(day.workouts || []), ...(day.watchWorkouts || [])].reduce((a, w) => a + w.mins, 0) / 30);
   return Math.round((kcalScore * 20 + prot * 20 + water * 15 + steps * 15 + sleep * 15 + move * 15));
 }
 

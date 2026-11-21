@@ -127,6 +127,17 @@ main { position: relative; }
 .tl-row.done .tl-dot { background: var(--c); box-shadow: 0 0 12px var(--c); }
 .tl-row:not(.done) { opacity: .75; }
 
+.watch .watch-ico { font-size: 36px; }
+.watch .btn { margin-top: 12px; }
+.sync { display: flex; align-items: center; gap: 6px; font-size: 18px; }
+.hr-row { display: flex; align-items: center; gap: 16px; margin: 12px 0 6px; }
+.heart-wrap { position: relative; width: 58px; height: 58px; display: grid; place-items: center; }
+.heart { font-size: 40px; position: relative; z-index: 1; filter: drop-shadow(0 0 12px rgba(255,80,80,.6)); }
+.heart-ring { position: absolute; inset: 4px; border-radius: 50%; border: 2px solid #ff6b6b; }
+.vitals { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 8px; }
+.vitals div { display: flex; flex-direction: column; align-items: center; padding: 8px 4px; border-radius: 14px; background: rgba(255,255,255,.04); }
+.vitals b { font-family: var(--mono); font-size: 17px; }
+.spark { width: 100%; height: 34px; }
 .tip { display: flex; align-items: center; gap: 14px; }
 .tip-icon { font-size: 30px; }
 
@@ -311,3 +322,5 @@ main { position: relative; }
   .hero { flex-direction: column; }
   .ex-grid { grid-template-columns: repeat(2, 1fr); }
 }
+.session { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px dashed rgba(255,255,255,.07); }
+.session:last-child { border-bottom: 0; }

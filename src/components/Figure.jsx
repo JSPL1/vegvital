@@ -245,66 +245,164 @@ export default function Figure({ pose = 'squat', size = 200, color = '#00f5a0', 
   const { fig, dx, dy } = solve(p, def.view);
   const X = (q) => q[0] + dx + centre;
   const Y = (q) => q[1] + dy;
-  const gid = `fg-${pose}-${color.replace('#', '')}`;
+  const gid = `fg-${pose}-${color.replace("#", "")}`;
   const side = def.view === 'side';
   const showFeet = def.feet !== false;
 
-  const Limb = ({ seg, w1, w2, far }) => (
-    <g opacity={far ? 0.5 : 1}>
-      <line x1={X(seg[0])} y1={Y(seg[0])} x2={X(seg[1])} y2={Y(seg[1])} stroke={`url(#${gid})`} strokeWidth={w1} strokeLinecap="round" />
-      <line x1={X(seg[1])} y1={Y(seg[1])} x2={X(seg[2])} y2={Y(seg[2])} stroke={`url(#${gid})`} strokeWidth={w2} strokeLinecap="round" />
-      <circle cx={X(seg[1])} cy={Y(seg[1])} r={w2 / 2.6} fill="rgba(255,255,255,.55)" />
+  // ---- realistic flat-illustration person ----
+  const skin = '#d9a066', skinDark = '#b98350', hair = '#1d1b1a';
+  const shirt = color, shirtDark = shade(color, 0.72);
+  const shorts = '#232f4b', shortsDark = '#1a2338';
+  const shoe = '#f4f6fb', sole = shade(color, 0.85);
+  const P = (q) => [X(q), Y(q)];
+
+  // tapered capsule between two points
+  const Cap = ({ a, b, wa, wb, fill }) => {
+    const [ax, ay] = a, [bx, by] = b;
+    const dxs = bx - ax, dys = by - ay, len = Math.hypot(dxs, dys) || 1;
+    const nx = -dys / len, ny = dxs / len;
+    const ra = wa / 2, rb = wb / 2;
+    return (
+      <g fill={fill}>
+        <path d={`M${ax + nx * ra} ${ay + ny * ra} L${bx + nx * rb} ${by + ny * rb} L${bx - nx * rb} ${by - ny * rb} L${ax - nx * ra} ${ay - ny * ra} Z`} />
+        <circle cx={ax} cy={ay} r={ra} /><circle cx={bx} cy={by} r={rb} />
+      </g>
+    );
+  };
+  const along = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+
+  const Arm = ({ seg, far }) => {
+    const s = P(seg[0]), e = P(seg[1]), h = P(seg[2]);
+    const sleeveEnd = along(s, e, 0.55);
+    return (
+      <g>
+        <Cap a={s} b={e} wa={W.ua + 1} wb={W.fa + 1} fill={far ? skinDark : skin} />
+        <Cap a={e} b={h} wa={W.fa + 1} wb={W.fa - 1.5} fill={far ? skinDark : skin} />
+        <circle cx={h[0]} cy={h[1]} r={4.6} fill={far ? skinDark : skin} />
+        <Cap a={s} b={sleeveEnd} wa={W.ua + 4} wb={W.ua + 3} fill={far ? shirtDark : shirt} />
+      </g>
+    );
+  };
+  const Leg = ({ seg, far, ang }) => {
+    const h = P(seg[0]), k = P(seg[1]), f = P(seg[2]);
+    const shortsEnd = along(h, k, 0.62);
+    const sockTop = along(k, f, 0.86);
+    // shoe points "forward" relative to the shin in side view
+    const fwd = side ? [Math.cos(rad(ang)), -Math.sin(rad(ang))] : [0, 0];
+    const toe = [f[0] + fwd[0] * 12, f[1] + fwd[1] * 12 + (side ? 0 : 3)];
+    const heel = [f[0] - fwd[0] * 2, f[1] - fwd[1] * 2 + (side ? 0 : 1)];
+    return (
+      <g>
+        <Cap a={h} b={k} wa={W.th + 1} wb={W.sh + 1} fill={far ? skinDark : skin} />
+        <Cap a={k} b={f} wa={W.sh + 1} wb={W.sh - 4} fill={far ? skinDark : skin} />
+        <Cap a={h} b={shortsEnd} wa={W.th + 5} wb={W.th + 4} fill={far ? shortsDark : shorts} />
+        {showFeet && (
+          <>
+            <Cap a={sockTop} b={f} wa={W.sh - 2.5} wb={W.sh - 3} fill="#e9edf5" />
+            {side
+              ? <Cap a={heel} b={toe} wa={9} wb={7.5} fill={far ? '#c9cfdb' : shoe} />
+              : <ellipse cx={f[0]} cy={f[1] + 4} rx="6.5" ry="5" fill={far ? '#c9cfdb' : shoe} />}
+            {side && <Cap a={[heel[0], heel[1] + 3.2]} b={[toe[0], toe[1] + 3]} wa={3} wb={3} fill={sole} />}
+          </>
+        )}
+      </g>
+    );
+  };
+
+  const hip = P(fig.hip), shp = P(fig.sh), head = P(fig.head);
+  const ht = rad(p.t + p.tilt);
+  const up = [Math.sin(ht), -Math.cos(ht)];          // head "up" direction
+  const fw = [Math.cos(ht), Math.sin(ht)];           // facing direction (side view)
+  const neckTop = [head[0] - up[0] * 8, head[1] - up[1] * 8];
+  const comX = (hip[0] + shp[0]) / 2;
+
+  const Head = () => side ? (
+    <g>
+      <Cap a={along(shp, neckTop, 0.1)} b={neckTop} wa={8} wb={7} fill={skinDark} />
+      <circle cx={head[0] - fw[0] * 1.6 + up[0] * 1.2} cy={head[1] - fw[1] * 1.6 + up[1] * 1.2} r={L.head + 0.6} fill={hair} />
+      <circle cx={head[0] + fw[0] * 1.8 - up[0] * 0.8} cy={head[1] + fw[1] * 1.8 - up[1] * 0.8} r={L.head - 1.3} fill={skin} />
+      {/* hair fringe over the top/back */}
+      <path d={`M${head[0] - fw[0] * 11 + up[0] * 2} ${head[1] - fw[1] * 11 + up[1] * 2}
+                Q${head[0] + up[0] * 14} ${head[1] + up[1] * 14} ${head[0] + fw[0] * 9 + up[0] * 5} ${head[1] + fw[1] * 9 + up[1] * 5}
+                L${head[0] + up[0] * 3} ${head[1] + up[1] * 3} Z`} fill={hair} />
+      <circle cx={head[0] - fw[0] * 2.5} cy={head[1] - fw[1] * 2.5} r="2.4" fill={skinDark} />
+      <circle cx={head[0] + fw[0] * 5.2 + up[0] * 1.5} cy={head[1] + fw[1] * 5.2 + up[1] * 1.5} r="1.35" fill="#141414" />
+      <path d={`M${head[0] + fw[0] * 4 - up[0] * 4} ${head[1] + fw[1] * 4 - up[1] * 4} q ${fw[0] * 2} ${fw[1] * 2} ${fw[0] * 3.6 + up[0] * 0.8} ${fw[1] * 3.6 + up[1] * 0.8}`}
+        stroke="#7a4a2a" strokeWidth="1.1" fill="none" strokeLinecap="round" />
+    </g>
+  ) : (
+    <g>
+      <Cap a={along(shp, neckTop, 0.1)} b={neckTop} wa={9} wb={8} fill={skinDark} />
+      <circle cx={head[0] + up[0] * 1.5} cy={head[1] + up[1] * 1.5} r={L.head + 0.8} fill={hair} />
+      <ellipse cx={head[0] - up[0] * 1} cy={head[1] - up[1] * 1 + 0.5} rx={L.head - 1.2} ry={L.head - 0.4} fill={skin}
+        transform={`rotate(${p.tilt} ${head[0]} ${head[1]})`} />
+      <path d={`M${head[0] - 10} ${head[1] - 2} Q${head[0]} ${head[1] - 15} ${head[0] + 10} ${head[1] - 2} Q${head[0]} ${head[1] - 8} ${head[0] - 10} ${head[1] - 2} Z`}
+        fill={hair} transform={`rotate(${p.tilt} ${head[0]} ${head[1]})`} />
+      <g transform={`rotate(${p.tilt} ${head[0]} ${head[1]})`}>
+        <circle cx={head[0] - 3.6} cy={head[1] + 1} r="1.3" fill="#141414" />
+        <circle cx={head[0] + 3.6} cy={head[1] + 1} r="1.3" fill="#141414" />
+        <path d={`M${head[0] - 2.6} ${head[1] + 5.2} Q${head[0]} ${head[1] + 7} ${head[0] + 2.6} ${head[1] + 5.2}`} stroke="#7a4a2a" strokeWidth="1.1" fill="none" strokeLinecap="round" />
+      </g>
     </g>
   );
-  const Foot = ({ seg, far }) => showFeet && (
-    <line opacity={far ? 0.5 : 1} x1={X(seg[2])} y1={Y(seg[2]) + 3} x2={X(seg[2]) + (side ? L.foot : 0)} y2={Y(seg[2]) + 4 + (side ? 0 : 0)}
-      stroke={`url(#${gid})`} strokeWidth={side ? 8 : 10} strokeLinecap="round" />
-  );
-  const comX = (X(fig.hip) + X(fig.sh)) / 2;
+
+  const Torso = () => side ? (
+    <g>
+      <Cap a={hip} b={along(hip, shp, 0.25)} wa={W.torso + 2} wb={W.torso + 1} fill={shorts} />
+      <Cap a={along(hip, shp, 0.18)} b={shp} wa={W.torso} wb={W.torso + 2} fill={shirt} />
+      <Cap a={along(hip, shp, 0.2)} b={along(hip, shp, 0.24)} wa={W.torso + 0.5} wb={W.torso + 0.5} fill={shirtDark} />
+    </g>
+  ) : (() => {
+    const sA = P(fig.sA), sB = P(fig.sB), hA = P(fig.hA), hB = P(fig.hB);
+    const wA = along(hA, sA, 0.22), wB = along(hB, sB, 0.22);
+    return (
+      <g>
+        <path d={`M${hA[0] + 3} ${hA[1] + 4} L${hB[0] - 3} ${hB[1] + 4} L${wB[0] - 2} ${wB[1]} L${wA[0] + 2} ${wA[1]} Z`} fill={shorts} stroke={shorts} strokeWidth="10" strokeLinejoin="round" />
+        <path d={`M${sA[0] + 2} ${sA[1]} L${sB[0] - 2} ${sB[1]} L${wB[0] - 1} ${wB[1]} L${wA[0] + 1} ${wA[1]} Z`} fill={shirt} stroke={shirt} strokeWidth="10" strokeLinejoin="round" />
+        <path d={`M${(sA[0] + sB[0]) / 2 - 4} ${sA[1] - 3} Q${(sA[0] + sB[0]) / 2} ${sA[1] + 3} ${(sA[0] + sB[0]) / 2 + 4} ${sA[1] - 3}`} stroke={shirtDark} strokeWidth="1.6" fill="none" />
+      </g>
+    );
+  })();
 
   return (
     <svg viewBox="0 0 200 200" width={size} height={size} className="figure2" aria-hidden>
       <defs>
-        <linearGradient id={gid} gradientUnits="userSpaceOnUse" x1="0" y1="20" x2="0" y2="190">
-          <stop offset="0" stopColor="#ffffff" stopOpacity=".95" />
-          <stop offset=".35" stopColor={color} />
-          <stop offset="1" stopColor={color} stopOpacity=".85" />
-        </linearGradient>
         <radialGradient id={`${gid}-sh`}><stop offset="0" stopColor="#000" stopOpacity=".55" /><stop offset="1" stopColor="#000" stopOpacity="0" /></radialGradient>
-        <radialGradient id={`${gid}-glow`}><stop offset="0" stopColor={color} stopOpacity=".22" /><stop offset="1" stopColor={color} stopOpacity="0" /></radialGradient>
+        <radialGradient id={`${gid}-glow`}><stop offset="0" stopColor={color} stopOpacity=".2" /><stop offset="1" stopColor={color} stopOpacity="0" /></radialGradient>
       </defs>
       <circle cx="100" cy="110" r="88" fill={`url(#${gid}-glow)`} />
       {showFloor && (
         <>
-          <rect x="18" y={GROUND + 1} width="164" height="5" rx="2.5" fill="rgba(255,255,255,.09)" />
-          <ellipse cx={comX} cy={GROUND + 3} rx={side ? 46 : 30} ry="5" fill={`url(#${gid}-sh)`} />
+          <rect x="14" y={GROUND + 5} width="172" height="6" rx="3" fill="rgba(255,255,255,.08)" />
+          <ellipse cx={comX} cy={GROUND + 6} rx={side ? 50 : 32} ry="5" fill={`url(#${gid}-sh)`} />
         </>
       )}
-      {/* far side */}
-      {side && <Limb seg={fig.legB} w1={W.th} w2={W.sh} far />}
-      {side && <Foot seg={fig.legB} far />}
-      {side && <Limb seg={fig.armB} w1={W.ua} w2={W.fa} far />}
-      {/* torso */}
       {side ? (
-        <line x1={X(fig.hip)} y1={Y(fig.hip)} x2={X(fig.sh)} y2={Y(fig.sh)} stroke={`url(#${gid})`} strokeWidth={W.torso} strokeLinecap="round" />
+        <>
+          <Arm seg={fig.armB} far />
+          <Leg seg={fig.legB} far ang={p.sB} />
+          {Torso}
+          <Head />
+          <Leg seg={fig.legA} ang={p.sA} />
+          <Arm seg={fig.armA} />
+        </>
       ) : (
-        <path d={`M${X(fig.sA)} ${Y(fig.sA)} L${X(fig.sB)} ${Y(fig.sB)} L${X(fig.hB)} ${Y(fig.hB)} L${X(fig.hA)} ${Y(fig.hA)} Z`}
-          fill={`url(#${gid})`} stroke={`url(#${gid})`} strokeWidth="12" strokeLinejoin="round" />
+        <>
+          <Leg seg={fig.legA} ang={0} />
+          <Leg seg={fig.legB} ang={0} />
+          {Torso}
+          <Arm seg={fig.armA} />
+          <Arm seg={fig.armB} />
+          <Head />
+        </>
       )}
-      {!side && <Limb seg={fig.legB} w1={W.th} w2={W.sh} />}
-      {!side && <Foot seg={fig.legB} />}
-      {!side && <Limb seg={fig.armB} w1={W.ua} w2={W.fa} />}
-      {/* head */}
-      <circle cx={X(fig.head)} cy={Y(fig.head)} r={L.head} fill={`url(#${gid})`} />
-      {side && (() => {
-        const a = rad(p.t + p.tilt);
-        const ex = X(fig.head) + Math.cos(a) * 5 + Math.sin(a) * 2, ey = Y(fig.head) + Math.sin(a) * 5 - Math.cos(a) * 2;
-        return <circle cx={ex} cy={ey} r="1.8" fill="#0a0f1a" />;
-      })()}
-      {/* near side */}
-      <Limb seg={fig.legA} w1={W.th} w2={W.sh} />
-      <Foot seg={fig.legA} />
-      <Limb seg={fig.armA} w1={W.ua} w2={W.fa} />
     </svg>
   );
+}
+
+function shade(hex, k) {
+  const h = hex.replace('#', '');
+  const n = parseInt(h.length === 3 ? h.split('').map((c) => c + c).join('') : h, 16);
+  const r = Math.round(((n >> 16) & 255) * k), g = Math.round(((n >> 8) & 255) * k), b = Math.round((n & 255) * k);
+  return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}`;
 }
