@@ -1,0 +1,9 @@
+{
+  "appId": "com.vegvital.app",
+  "appName": "VegVital",
+  "webDir": "dist",
+  "android": { "backgroundColor": "#070b14" },
+  "plugins": {
+    "LocalNotifications": { "iconColor": "#00f5a0" }
+  }
+}

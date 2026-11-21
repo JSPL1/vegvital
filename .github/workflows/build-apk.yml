@@ -1,0 +1,72 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install & build web app
+        run: |
+          npm ci
+          npm run build
+          npx cap sync android
+
+      - name: Restore signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/vegvital.p12"
+            echo "KEYSTORE_FILE=$RUNNER_TEMP/vegvital.p12" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build signed release APK
+        working-directory: android
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          VERSION_CODE: ${{ github.run_number }}
+        run: |
+          chmod +x gradlew
+          if [ -n "$KEYSTORE_FILE" ]; then
+            ./gradlew assembleRelease --no-daemon
+            cp app/build/outputs/apk/release/app-release.apk "$GITHUB_WORKSPACE/VegVital.apk"
+          else
+            ./gradlew assembleDebug --no-daemon
+            cp app/build/outputs/apk/debug/app-debug.apk "$GITHUB_WORKSPACE/VegVital.apk"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VegVital-apk
+          path: VegVital.apk
+
+      - name: Publish release (download link for your phone)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: VegVital 1.0.${{ github.run_number }}
+          body: |
+            Install: open this page on your Android phone → tap **VegVital.apk** → allow "Install unknown apps".
+            Updates install over the previous version and keep your data.
+          files: VegVital.apk
