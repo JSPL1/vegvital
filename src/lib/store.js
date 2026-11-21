@@ -27,6 +27,8 @@ const DEFAULT = {
     workEnd: '19:00',
     autoPlan: true, // auto-log planned meal when its time window passes
     reminders: true,
+    aiProvider: 'gemini', // gemini (free) | claude (paid) | offline
+    geminiKey: '',
     apiKey: '',
     diet: 'veg', // veg today, 'nonveg' in a future version
   },

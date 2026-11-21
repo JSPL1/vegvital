@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useStore, updateProfile, suggestedKcal, bmi, setState, getState } from '../lib/store.js';
 import { connectHealth, scheduleReminders, healthAvailable } from '../lib/auto.js';
-import { testKey } from '../lib/ai.js';
+import { testKey, testGeminiKey } from '../lib/ai.js';
 import { Card, stagger, rise, Button, Pill, tap } from '../components/ui.jsx';
 
 function Field({ label, children }) {
@@ -13,6 +13,7 @@ export default function Settings({ back, toast }) {
   const p = useStore((s) => s.profile);
   const connected = useStore((s) => s.healthConnected);
   const [key, setKey] = useState(p.apiKey);
+  const [gkey, setGkey] = useState(p.geminiKey || '');
   const [testing, setTesting] = useState(false);
   const num = (k) => (e) => updateProfile({ [k]: Number(e.target.value) });
   const str = (k) => (e) => updateProfile({ [k]: e.target.value });
@@ -21,6 +22,13 @@ export default function Settings({ back, toast }) {
     setTesting(true);
     try { await testKey(key.trim()); updateProfile({ apiKey: key.trim() }); toast('✅ AI key works — photo scanning is ready'); }
     catch (e) { toast('❌ Key rejected: ' + String(e?.message || e).slice(0, 80)); }
+    setTesting(false);
+  }
+
+  async function saveGemini() {
+    setTesting(true);
+    try { const m = await testGeminiKey(gkey.trim()); updateProfile({ geminiKey: gkey.trim(), aiProvider: 'gemini' }); toast(`✅ Free Gemini AI ready (${m.replace('models/', '')})`); }
+    catch (e) { toast('❌ Gemini key rejected: ' + String(e?.message || e).slice(0, 80)); }
     setTesting(false);
   }
 
@@ -44,12 +52,40 @@ export default function Settings({ back, toast }) {
 
       <Card>
         <h3>🤖 AI food scanner</h3>
-        <p className="small muted">Paste your Anthropic API key once (console.anthropic.com → API keys). It stays only on this phone and is used to read your food photos.</p>
-        <div className="row gap">
-          <input className="input grow" type="password" placeholder="sk-ant-…" value={key} onChange={(e) => setKey(e.target.value)} />
-          <Button onClick={saveKey} disabled={testing || !key}>{testing ? '…' : 'Save'}</Button>
+        <div className="prov">
+          {[['gemini', '✨', 'Gemini', 'FREE'], ['offline', '👆', 'Quick-pick', 'FREE · offline'], ['claude', '🧠', 'Claude', 'paid']].map(([k, e, l, s]) => (
+            <motion.button key={k} whileTap={{ scale: 0.93 }} className={(p.aiProvider || 'gemini') === k ? 'on' : ''} onClick={() => { tap(); updateProfile({ aiProvider: k }); }}>
+              <span style={{ fontSize: 22 }}>{e}</span><b className="small">{l}</b><span className="tiny muted">{s}</span>
+            </motion.button>
+          ))}
         </div>
-        {p.apiKey && <div className="tiny ok-text">● Connected</div>}
+
+        {(p.aiProvider || 'gemini') === 'gemini' && (
+          <>
+            <p className="small muted">Free Google AI: no card needed. On any browser go to <b>aistudio.google.com/apikey</b>, sign in with Gmail, tap <b>Create API key</b>, copy it and paste here. The free tier easily covers several photos a day.</p>
+            <div className="row gap">
+              <input className="input grow" type="password" placeholder="AIza…" value={gkey} onChange={(e) => setGkey(e.target.value)} />
+              <Button onClick={saveGemini} disabled={testing || !gkey}>{testing ? '…' : 'Save'}</Button>
+            </div>
+            {p.geminiKey && <div className="tiny ok-text">● Connected — photos are read automatically</div>}
+          </>
+        )}
+
+        {p.aiProvider === 'offline' && (
+          <p className="small muted">No key, no internet needed. After a photo you tap the foods on your plate (your plan’s items show first) and the app counts everything from its built-in food chart.</p>
+        )}
+
+        {p.aiProvider === 'claude' && (
+          <>
+            <p className="small muted">Most accurate, paid (~2–4¢ per photo). Key from console.anthropic.com → API keys.</p>
+            <div className="row gap">
+              <input className="input grow" type="password" placeholder="sk-ant-…" value={key} onChange={(e) => setKey(e.target.value)} />
+              <Button onClick={saveKey} disabled={testing || !key}>{testing ? '…' : 'Save'}</Button>
+            </div>
+            {p.apiKey && <div className="tiny ok-text">● Connected</div>}
+          </>
+        )}
+        <p className="tiny muted">Keys stay only on this phone.</p>
       </Card>
 
       <Card>

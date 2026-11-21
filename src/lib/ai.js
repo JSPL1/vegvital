@@ -55,6 +55,97 @@ function client(apiKey) {
   return new Anthropic({ apiKey, dangerouslyAllowBrowser: true });
 }
 
+// ---------- Provider switch ----------
+// 'gemini'  → Google Gemini free tier (no card needed, aistudio.google.com)
+// 'claude'  → Anthropic Claude (paid, most accurate)
+// 'offline' → no AI: tap-to-pick from your plan + food chart
+export function activeProvider(profile) {
+  const p = profile.aiProvider || 'gemini';
+  if (p === 'gemini' && profile.geminiKey) return 'gemini';
+  if (p === 'claude' && profile.apiKey) return 'claude';
+  return 'offline';
+}
+
+export async function analyzeWithProfile(profile, args) {
+  const prov = activeProvider(profile);
+  if (prov === 'gemini') return analyzeGemini({ ...args, apiKey: profile.geminiKey });
+  if (prov === 'claude') return analyzeFoodPhoto({ ...args, apiKey: profile.apiKey });
+  throw new Error('NO_KEY');
+}
+
+function normalise(data) {
+  const flagged = (data.items || []).some((i) => DISALLOWED_WORDS.some((w) => String(i.name).toLowerCase().includes(w)));
+  data.contains_non_veg = !!data.contains_non_veg || flagged;
+  data.items = (data.items || []).map((i) => ({
+    id: 'ai_' + Math.random().toString(36).slice(2, 8),
+    name: i.name,
+    emoji: i.emoji || '🍽️',
+    serving: i.portion,
+    kcal: +i.kcal || 0, p: +i.protein_g || 0, c: +i.carbs_g || 0, f: +i.fat_g || 0, fb: +i.fiber_g || 0,
+    confidence: i.confidence ?? 0.7,
+    qty: 1,
+  }));
+  data.health_score = Math.max(1, Math.min(10, Math.round(+data.health_score || 5)));
+  return data;
+}
+
+// ---------- Google Gemini (free tier) ----------
+const GEMINI = 'https://generativelanguage.googleapis.com/v1beta';
+let geminiModel = null;
+
+async function pickGeminiModel(apiKey) {
+  if (geminiModel) return geminiModel;
+  const r = await fetch(`${GEMINI}/models?pageSize=200`, { headers: { 'x-goog-api-key': apiKey } });
+  if (!r.ok) throw new Error(r.status === 400 || r.status === 403 ? 'Gemini key invalid (401)' : `Gemini error ${r.status}`);
+  const { models = [] } = await r.json();
+  const ok = models.filter((m) => (m.supportedGenerationMethods || []).includes('generateContent')
+    && /flash/i.test(m.name) && !/(image|tts|audio|live|thinking-exp|embedding)/i.test(m.name));
+  // prefer the newest stable "flash" model (not lite, not preview), then any flash
+  const score = (n) => {
+    const v = parseFloat((n.match(/gemini-(\d+(\.\d+)?)/) || [])[1] || 0);
+    return v * 10 + (/lite/.test(n) ? -3 : 0) + (/preview|exp/.test(n) ? -2 : 0) + (/latest/.test(n) ? 1 : 0);
+  };
+  ok.sort((a, b) => score(b.name) - score(a.name));
+  geminiModel = (ok[0]?.name || 'models/gemini-2.5-flash');
+  return geminiModel;
+}
+
+const JSON_SHAPE = `Reply ONLY with JSON of this exact shape:
+{"is_food":true,"meal_name":"","items":[{"name":"","emoji":"","portion":"","grams":0,"kcal":0,"protein_g":0,"carbs_g":0,"fat_g":0,"fiber_g":0,"confidence":0.0}],
+"health_score":1-10,"verdict":"one short line","tip":"one actionable tip","contains_non_veg":false,"contains_alcohol":false}`;
+
+export async function analyzeGemini({ base64, mediaType = 'image/jpeg', apiKey, mealLabel, remainingKcal }) {
+  const model = await pickGeminiModel(apiKey);
+  const body = {
+    systemInstruction: { parts: [{ text: SYSTEM + '\n\n' + JSON_SHAPE }] },
+    contents: [{
+      role: 'user',
+      parts: [
+        { inlineData: { mimeType: mediaType, data: base64 } },
+        { text: `This is my ${mealLabel || 'meal'}. I have about ${Math.round(remainingKcal ?? 0)} kcal left for today. Analyse it.` },
+      ],
+    }],
+    generationConfig: { responseMimeType: 'application/json', temperature: 0.2 },
+  };
+  const r = await fetch(`${GEMINI}/${model}:generateContent`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+    body: JSON.stringify(body),
+  });
+  if (r.status === 429) throw new Error('Free Gemini limit reached for now — try again in a minute (or use quick-pick).');
+  if (!r.ok) throw new Error(r.status === 400 || r.status === 403 ? 'Gemini key invalid (401)' : `Gemini error ${r.status}`);
+  const j = await r.json();
+  const text = (j.candidates?.[0]?.content?.parts || []).map((p) => p.text || '').join('');
+  const clean = text.replace(/^```(json)?/i, '').replace(/```$/, '').trim();
+  return normalise(JSON.parse(clean));
+}
+
+export async function testGeminiKey(apiKey) {
+  geminiModel = null;
+  return pickGeminiModel(apiKey);
+}
+
+// ---------- Anthropic Claude (paid) ----------
 export async function analyzeFoodPhoto({ base64, mediaType = 'image/jpeg', apiKey, mealLabel, remainingKcal }) {
   if (!apiKey) throw new Error('NO_KEY');
   const anthropic = client(apiKey);
@@ -81,19 +172,7 @@ export async function analyzeFoodPhoto({ base64, mediaType = 'image/jpeg', apiKe
 
   if (response.stop_reason === 'refusal') throw new Error('The photo could not be analysed. Try another angle.');
   const text = response.content.filter((b) => b.type === 'text').map((b) => b.text).join('');
-  const data = JSON.parse(text);
-  const flagged = data.items.some((i) => DISALLOWED_WORDS.some((w) => i.name.toLowerCase().includes(w)));
-  data.contains_non_veg = data.contains_non_veg || flagged;
-  data.items = data.items.map((i) => ({
-    id: 'ai_' + Math.random().toString(36).slice(2, 8),
-    name: i.name,
-    emoji: i.emoji || '🍽️',
-    serving: i.portion,
-    kcal: i.kcal, p: i.protein_g, c: i.carbs_g, f: i.fat_g, fb: i.fiber_g,
-    confidence: i.confidence,
-    qty: 1,
-  }));
-  return data;
+  return normalise(JSON.parse(text));
 }
 
 export async function testKey(apiKey) {

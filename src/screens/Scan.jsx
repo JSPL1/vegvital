@@ -3,10 +3,10 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
 import { Capacitor } from '@capacitor/core';
 import { useStore, updateDay, getState, getDay } from '../lib/store.js';
-import { analyzeFoodPhoto, shrinkImage } from '../lib/ai.js';
+import { analyzeWithProfile, activeProvider, shrinkImage } from '../lib/ai.js';
 import { dayTotals, burned } from '../lib/calc.js';
-import { MEAL_SLOTS } from '../data/plan.js';
-import { sumNutrition } from '../data/foods.js';
+import { MEAL_SLOTS, planForDate } from '../data/plan.js';
+import { sumNutrition, FOODS, healthScore } from '../data/foods.js';
 import { Button, Ring, CountUp, tap } from '../components/ui.jsx';
 
 const toMin = (t) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
@@ -20,7 +20,8 @@ function guessSlot() {
 const MSGS = ['Spotting every item on your plate…', 'Estimating portion sizes…', 'Counting oil & ghee…', 'Calculating protein & fibre…', 'Scoring how healthy it is…'];
 
 export default function Scan({ onClose, initialSlot, go }) {
-  const apiKey = useStore((s) => s.profile.apiKey);
+  const profile = useStore((s) => s.profile);
+  const provider = activeProvider(profile);
   const [img, setImg] = useState(null);
   const [stage, setStage] = useState('camera'); // camera | analyzing | result | error
   const [res, setRes] = useState(null);
@@ -51,14 +52,14 @@ export default function Scan({ onClose, initialSlot, go }) {
   }
 
   async function run(base64) {
-    if (!apiKey) { setStage('nokey'); return; }
+    if (provider === 'offline') { setStage('pick'); return; }
     setStage('analyzing');
     try {
       const p = getState().profile;
       const d = getDay();
       const remaining = p.targetKcal - dayTotals(d).kcal + burned(d, p.weightKg);
       const label = MEAL_SLOTS.find((s) => s.key === slot)?.label;
-      const r = await analyzeFoodPhoto({ base64, apiKey, mealLabel: label, remainingKcal: remaining });
+      const r = await analyzeWithProfile(p, { base64, mealLabel: label, remainingKcal: remaining });
       if (!r.is_food) { setErr('No food found in that photo. Try again with the plate in frame.'); setStage('error'); return; }
       setRes(r); setStage('result');
     } catch (e) {
@@ -128,19 +129,16 @@ export default function Scan({ onClose, initialSlot, go }) {
           </motion.div>
         )}
 
-        {stage === 'nokey' && (
-          <motion.div key="k" className="scan-panel col gap" initial={{ y: 40, opacity: 0 }} animate={{ y: 0, opacity: 1 }}>
-            <b>One-time setup needed 🔑</b>
-            <p className="small muted">Photo calorie counting uses Claude AI. Paste your API key once in Settings and every photo after that is fully automatic.</p>
-            <Button onClick={() => { onClose(false); go('settings'); }}>Open Settings</Button>
-          </motion.div>
+        {stage === 'pick' && (
+          <QuickPick key="q" slot={slot} onDone={(r) => { setRes(r); setStage('result'); }}
+            onSetup={() => { onClose(false); go('settings'); }} />
         )}
 
         {stage === 'error' && (
           <motion.div key="e" className="scan-panel col gap" initial={{ y: 40, opacity: 0 }} animate={{ y: 0, opacity: 1 }}>
             <b>😕 Couldn’t analyse</b>
             <p className="small muted">{err}</p>
-            <div className="row gap"><Button className="grow" onClick={() => capture(CameraSource.Camera)}>Retake</Button><Button variant="ghost" onClick={() => onClose(false)}>Close</Button></div>
+            <div className="row gap wrap"><Button className="grow" onClick={() => capture(CameraSource.Camera)}>Retake</Button><Button variant="ghost" onClick={() => setStage('pick')}>👆 Quick-pick</Button><Button variant="ghost" onClick={() => onClose(false)}>Close</Button></div>
           </motion.div>
         )}
 
@@ -183,6 +181,50 @@ export default function Scan({ onClose, initialSlot, go }) {
           </motion.div>
         )}
       </AnimatePresence>
+    </motion.div>
+  );
+}
+
+// Free, offline: tap what's on the plate (your plan's items for this meal come first).
+function QuickPick({ slot, onDone, onSetup }) {
+  const [q, setQ] = useState('');
+  const [picked, setPicked] = useState([]);
+  const planned = planForDate().meals[slot]?.items || [];
+  const plannedIds = new Set(planned.map((i) => i.id));
+  const list = q
+    ? FOODS.filter((f) => f.name.toLowerCase().includes(q.toLowerCase())).slice(0, 24)
+    : [...planned, ...FOODS.filter((f) => !plannedIds.has(f.id) && ['Breakfast', 'Dal', 'Sabzi', 'Grains', 'Snack', 'Protein'].includes(f.cat)).slice(0, 18)];
+  const toggle = (f) => { tap(); setPicked((p) => (p.some((x) => x.id === f.id) ? p.filter((x) => x.id !== f.id) : [...p, f])); };
+  const done = () => {
+    const items = picked.map((f) => ({ ...f, id: 'qp_' + f.id, qty: 1 }));
+    const n = sumNutrition(items);
+    const score = healthScore(n, picked.flatMap((f) => f.tags || []));
+    onDone({
+      is_food: true, meal_name: picked.map((f) => f.name).slice(0, 2).join(' + ') || 'Meal', items,
+      health_score: score,
+      verdict: score >= 7 ? 'Balanced, protein-smart choice 👍' : score >= 4 ? 'Okay — could use more protein or veggies' : 'Heavy meal — keep the next one light',
+      tip: n.p < 15 ? 'Add curd, paneer, dal or sprouts for protein.' : n.fb < 5 ? 'Add a salad or sabzi for fibre.' : 'Great — remember a glass of water.',
+      contains_non_veg: false, contains_alcohol: false,
+    });
+  };
+  return (
+    <motion.div className="scan-panel result col gap" initial={{ y: 40, opacity: 0 }} animate={{ y: 0, opacity: 1 }}>
+      <div className="row-between"><b>👆 Tap what’s on your plate</b><span className="tiny muted">free · offline</span></div>
+      <div className="search"><span>🔎</span><input placeholder="Search foods…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
+      <div className="pick-grid">
+        {list.map((f) => {
+          const on = picked.some((x) => x.id === f.id);
+          return (
+            <motion.button key={f.id} className={`pick ${on ? 'on' : ''}`} whileTap={{ scale: 0.9 }} onClick={() => toggle(f)}>
+              <span className="emoji">{f.emoji}</span>
+              <span className="tiny">{f.name}</span>
+              <span className="tiny muted">{f.kcal} kcal{plannedIds.has(f.id) ? ' · plan' : ''}</span>
+            </motion.button>
+          );
+        })}
+      </div>
+      <Button className="full" disabled={!picked.length} onClick={done}>Continue with {picked.length} item{picked.length === 1 ? '' : 's'} →</Button>
+      <button className="tiny muted link" onClick={onSetup}>Want automatic photo reading? Add a free Gemini key in Settings</button>
     </motion.div>
   );
 }
