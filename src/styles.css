@@ -331,3 +331,20 @@ main { position: relative; }
 .restore-link { margin-top: 14px; font-size: 14px; color: var(--muted); text-align: center; }
 .restore-link b { color: #00f5a0; }
 .queued { background: rgba(255,209,102,.08); border: 1px solid rgba(255,209,102,.35); border-radius: 14px; padding: 10px 12px; }
+
+/* ---------- photo diary ---------- */
+.photo-diary h3 { margin: 0; }
+.pd-strip { display: flex; gap: 10px; overflow-x: auto; padding: 12px 2px 4px; scrollbar-width: none; }
+.pd-strip::-webkit-scrollbar { display: none; }
+.pd-thumb { position: relative; flex: 0 0 86px; height: 104px; border-radius: 14px; overflow: hidden; background: rgba(255,255,255,.05); border: 1px solid var(--card-b); padding: 0; }
+.pd-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.pd-ph { display: grid; place-items: center; height: 100%; font-size: 30px; }
+.pd-thumb small { position: absolute; left: 0; right: 0; bottom: 0; padding: 14px 6px 5px; font-size: 10.5px; color: #fff; text-align: left; background: linear-gradient(transparent, rgba(0,0,0,.78)); }
+.pd-badge { position: absolute; top: 5px; right: 5px; font-style: normal; font-size: 12px; width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%; background: rgba(0,0,0,.55); }
+.pd-badge.waiting { animation: pdpulse 1.4s ease-in-out infinite; }
+@keyframes pdpulse { 50% { transform: scale(1.18); background: rgba(255,196,0,.45); } }
+.pd-wait { margin-top: 8px; }
+.pd-big { width: 100%; max-height: 52vh; object-fit: cover; border-radius: 16px; }
+.update-banner { display: flex; align-items: center; gap: 10px; padding: 12px 14px; margin-bottom: 12px; border-radius: 16px; background: linear-gradient(135deg, rgba(0,245,160,.18), rgba(0,217,245,.14)); border: 1px solid rgba(0,245,160,.45); }
+.update-banner b { display: block; font-size: 14px; }
+.update-banner .grow { flex: 1; }

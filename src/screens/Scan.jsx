@@ -4,7 +4,8 @@ import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
 import { Capacitor } from '@capacitor/core';
 import { useStore, updateDay, getState, getDay } from '../lib/store.js';
 import { analyzeWithProfile, activeProvider, shrinkImage } from '../lib/ai.js';
-import { queuePhoto } from '../lib/pending.js';
+import { queuePhoto, importGalleryPhotos } from '../lib/pending.js';
+import { newPhotoId, savePhotoFile, addDiary } from '../lib/photos.js';
 import { dayTotals, burned } from '../lib/calc.js';
 import { MEAL_SLOTS, planForDate } from '../data/plan.js';
 import { sumNutrition, FOODS, healthScore } from '../data/foods.js';
@@ -33,6 +34,8 @@ export default function Scan({ onClose, initialSlot, go }) {
   const lastB64 = useRef(null);
   const smallB64 = useRef(null);
   const [pendingId, setPendingId] = useState(null);
+  const photoId = useRef(null);
+  const [imported, setImported] = useState(0);
 
   useEffect(() => { if (stage !== 'analyzing') return; const t = setInterval(() => setMsg((m) => (m + 1) % MSGS.length), 1600); return () => clearInterval(t); }, [stage]);
   useEffect(() => { if (Capacitor.isNativePlatform()) capture(CameraSource.Camera); }, []);
@@ -51,6 +54,9 @@ export default function Scan({ onClose, initialSlot, go }) {
       setImg(small.dataUrl);
       lastB64.current = small.base64;
       try { smallB64.current = (await shrinkImage(dataUrl, 768)).base64; } catch { smallB64.current = small.base64; }
+      photoId.current = newPhotoId();
+      savePhotoFile(photoId.current, smallB64.current);
+      setPendingId(null);
       run(small.base64);
     } catch (e) {
       if (String(e?.message || e).toLowerCase().includes('cancel')) return;
@@ -74,7 +80,10 @@ export default function Scan({ onClose, initialSlot, go }) {
       const keyBad = m.includes('401') || m.includes('authentication') || m.includes('invalid');
       if (!keyBad) {
         // never block logging: save the photo for automatic re-analysis and let the user quick-pick now
-        if (!pendingId) setPendingId(queuePhoto({ base64: smallB64.current || base64, slot }));
+        if (!pendingId) {
+          addDiary({ id: photoId.current, slot, status: 'waiting' });
+          setPendingId(queuePhoto({ photoId: photoId.current, slot }));
+        }
         setErr(m);
         setStage('pick');
         return;
@@ -88,9 +97,10 @@ export default function Scan({ onClose, initialSlot, go }) {
     tap();
     updateDay((d) => {
       const meals = { ...d.meals };
-      meals[slot] = { items: res.items, source: res.quick ? 'quick-pick' : 'photo', time: new Date().toISOString(), name: res.meal_name, score: res.health_score, ...(res.quick && pendingId ? { pendingId } : {}) };
+      meals[slot] = { items: res.items, source: res.quick ? 'quick-pick' : 'photo', time: new Date().toISOString(), name: res.meal_name, score: res.health_score, photoId: photoId.current || undefined, ...(res.quick && pendingId ? { pendingId } : {}) };
       return { ...d, meals };
     });
+    if (photoId.current) addDiary({ id: photoId.current, slot, status: res.quick && pendingId ? 'waiting' : 'done', name: res.meal_name, kcal: Math.round(sumNutrition(res.items).kcal) });
     onClose(true);
   }
 
@@ -138,9 +148,18 @@ export default function Scan({ onClose, initialSlot, go }) {
         )}
 
         {stage === 'camera' && (
-          <motion.div key="c" className="scan-panel row gap" initial={{ y: 40, opacity: 0 }} animate={{ y: 0, opacity: 1 }}>
-            <Button className="grow" onClick={() => capture(CameraSource.Camera)}>📸 Take photo</Button>
-            <Button variant="ghost" onClick={() => capture(CameraSource.Photos)}>🖼️ Gallery</Button>
+          <motion.div key="c" className="scan-panel col gap" initial={{ y: 40, opacity: 0 }} animate={{ y: 0, opacity: 1 }}>
+            <div className="row gap">
+              <Button className="grow" onClick={() => capture(CameraSource.Camera)}>📸 Take photo</Button>
+              <Button variant="ghost" onClick={() => capture(CameraSource.Photos)}>🖼️ One photo</Button>
+            </div>
+            <Button variant="ghost" onClick={async () => {
+              try {
+                const n = await importGalleryPhotos();
+                if (n) { setImported(n); setTimeout(() => onClose(false), 1600); }
+              } catch (e) { if (!String(e?.message || e).toLowerCase().includes('cancel')) { setErr(String(e?.message || e)); setStage('error'); } }
+            }}>🗂️ Add many food photos from gallery</Button>
+            {imported > 0 && <div className="tiny center">✅ {imported} photo{imported > 1 ? 's' : ''} saved — the AI will read them one by one in the background</div>}
           </motion.div>
         )}
 

@@ -159,6 +159,8 @@ export default function Settings({ back, toast }) {
         </div>
         <ul className="list tiny muted">
           <li>☁️ Tap <b>Back up now</b> → choose <b>Google Drive</b> (or WhatsApp → Message yourself)</li>
+          <li>⬆️ Updates install over the app (Update banner) — profile, meals and photos stay. No reinstall needed.</li>
+          <li>💾 A copy is also saved automatically every day to <b>Documents/VegVital</b> on your phone</li>
           <li>📲 After reinstalling: on the first screen tap <b>Restore from backup</b> and pick that file</li>
           <li>🔄 Android Google Backup also restores automatically if it’s on: Settings → Google → Backup → “Back up to Google Drive” ON</li>
           <li>🔒 AI keys are not stored in backups — paste them again after restoring</li>
@@ -235,6 +237,7 @@ export function Onboarding({ done }) {
       <div className="dots">{[0, 1, 2, 3].map((k) => <motion.i key={k} animate={{ width: k === step ? 22 : 8, opacity: k === step ? 1 : 0.4 }} />)}</div>
       <Button className="full" onClick={next}>{step < slides.length ? 'Next →' : 'Start my journey 🚀'}</Button>
       <button className="restore-link" onClick={restore}>♻️ Already used VegVital? <b>Restore from backup</b></button>
+      <div className="tiny muted center-text" style={{ position: 'relative' }}>Your daily auto-copy is in <b>Documents › VegVital</b></div>
       {rmsg && <div className="tiny warn center-text" style={{ position: 'relative' }}>⚠️ {rmsg}</div>}
     </div>
   );

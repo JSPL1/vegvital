@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useStore } from './lib/store.js';
 import { startAutomation } from './lib/auto.js';
+import { startUpdateChecks, installUpdate } from './lib/update.js';
 import Home from './screens/Home.jsx';
 import Food from './screens/Food.jsx';
 import Scan from './screens/Scan.jsx';
@@ -21,6 +22,8 @@ const TABS = [
 export default function App() {
   const onboarded = useStore((s) => s.onboarded);
   const pendingDone = useStore((s) => s.pendingDone);
+  const update = useStore((s) => s.update);
+  const [hideUpd, setHideUpd] = useState(false);
   const [tab, setTab] = useState('home');
   const [prev, setPrev] = useState('home');
   const [scan, setScan] = useState(null); // null | {slot}
@@ -28,7 +31,7 @@ export default function App() {
   const [toast, setToast] = useState('');
   const [party, setParty] = useState(false);
 
-  useEffect(() => { startAutomation(); }, []);
+  useEffect(() => { startAutomation(); startUpdateChecks(); }, []);
   useEffect(() => { if (pendingDone) setToast(`✨ AI updated ${pendingDone.count} meal${pendingDone.count > 1 ? 's' : ''} from your saved photo${pendingDone.count > 1 ? 's' : ''}`); }, [pendingDone?.at]);
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(''), 2800); return () => clearTimeout(t); }, [toast]);
 
@@ -45,9 +48,17 @@ export default function App() {
     <div className="app">
       <div className="bg"><div className="blob b1" /><div className="blob b2" /><div className="blob b3" /><div className="grid-bg" /></div>
       <Toast msg={toast} />
+      {update && !hideUpd && (
+        <motion.div className="update-banner" initial={{ y: -30, opacity: 0 }} animate={{ y: 0, opacity: 1 }} style={{ position: 'relative', zIndex: 5, margin: '12px 14px 0' }}>
+          <span style={{ fontSize: 24 }}>⬆️</span>
+          <div className="grow"><b>Update {update.version} is ready</b><span className="tiny muted">Installs over this app · your data stays</span></div>
+          <button className="chipbtn on" onClick={() => { tap(); installUpdate(update); }}>Update</button>
+          <button className="icon-btn" onClick={() => setHideUpd(true)}>✕</button>
+        </motion.div>
+      )}
       <AnimatePresence mode="wait">
         <motion.main key={tab} initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.22 }}>
-          {tab === 'home' && <Home go={go} openScan={() => go('scan')} />}
+          {tab === 'home' && <Home go={go} openScan={() => go('scan')} toast={setToast} />}
           {tab === 'food' && <Food openScan={(slot) => go('scan', slot)} />}
           {tab === 'move' && <Move startId={moveStart} clearStart={() => setMoveStart(null)} />}
           {tab === 'insights' && <Insights />}

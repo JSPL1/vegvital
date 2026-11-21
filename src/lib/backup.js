@@ -10,6 +10,7 @@ function snapshot() {
   const s = structuredClone(getState());
   // API keys are never put in a backup file (it may travel through WhatsApp/Drive)
   s.profile = { ...s.profile, apiKey: '', geminiKey: '' };
+  delete s.pending; delete s.update; delete s.pendingDone;
   return { app: 'VegVital', version: 1, createdAt: new Date().toISOString(), state: s };
 }
 
@@ -68,4 +69,18 @@ export function restoreFromText(text) {
 export function backupAgeDays() {
   const lb = getState().lastBackup;
   return lb ? Math.floor((Date.now() - new Date(lb)) / 86400e3) : null;
+}
+
+/** Silent daily copy in the phone's public Documents/VegVital folder. After a reinstall,
+ *  "Restore from backup" can pick this file, so profile details never need typing again. */
+export async function autoBackup() {
+  if (!native) return;
+  const s = getState();
+  if (!s.onboarded) return;
+  const last = s.lastAutoBackup ? new Date(s.lastAutoBackup) : null;
+  if (last && Date.now() - last < 20 * 3600e3) return;
+  try {
+    await Filesystem.writeFile({ path: 'VegVital/VegVital-autobackup.json', data: JSON.stringify(snapshot()), directory: Directory.Documents, encoding: Encoding.UTF8, recursive: true });
+    setState({ lastAutoBackup: new Date().toISOString() });
+  } catch { /* storage not available: the manual backup still works */ }
 }

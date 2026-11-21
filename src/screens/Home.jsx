@@ -4,11 +4,12 @@ import { useStore, updateDay, todayKey, emptyDay } from '../lib/store.js';
 import { dayTotals, burned, proteinGoal, dayScore, fmtH, fmtTime } from '../lib/calc.js';
 import { MEAL_SLOTS, planForDate, DAILY_RULES } from '../data/plan.js';
 import WatchCard from '../components/WatchCard.jsx';
+import PhotoDiary from '../components/PhotoDiary.jsx';
 import { Ring, CountUp, Card, Bar, stagger, rise, WaterGlass, Sheet, Button, Pill, tap, useNow } from '../components/ui.jsx';
 
 const toMin = (t) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
 
-export default function Home({ go, openScan }) {
+export default function Home({ go, openScan, toast }) {
   const profile = useStore((s) => s.profile);
   const day = useStore((s) => s.days[todayKey()]) || emptyDay();
   const now = useNow();
@@ -139,6 +140,8 @@ export default function Home({ go, openScan }) {
       </div>
 
       <WatchCard />
+
+      <PhotoDiary toast={toast} />
 
       {/* TIMELINE */}
       <Card className="timeline">
