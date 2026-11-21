@@ -324,3 +324,9 @@ main { position: relative; }
 }
 .session { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px dashed rgba(255,255,255,.07); }
 .session:last-child { border-bottom: 0; }
+.brand-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.brand { display: flex; flex-direction: column; gap: 3px; align-items: flex-start; text-align: left; padding: 12px; border-radius: 16px; background: color-mix(in srgb, var(--c) 10%, transparent); border: 1px solid color-mix(in srgb, var(--c) 35%, transparent); }
+.watch-help { display: block; margin: 10px auto 0; color: #ffd166; }
+.backup-row { display: flex; align-items: center; gap: 10px; }
+.restore-link { margin-top: 14px; font-size: 14px; color: var(--muted); text-align: center; }
+.restore-link b { color: #00f5a0; }

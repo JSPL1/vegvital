@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useStore, updateProfile, suggestedKcal, bmi, setState, getState } from '../lib/store.js';
 import { connectHealth, scheduleReminders, healthAvailable } from '../lib/auto.js';
 import { testKey, testGeminiKey } from '../lib/ai.js';
+import { backupNow, pickAndRestore, backupAgeDays } from '../lib/backup.js';
 import { Card, stagger, rise, Button, Pill, tap } from '../components/ui.jsx';
 
 function Field({ label, children }) {
@@ -12,6 +13,8 @@ function Field({ label, children }) {
 export default function Settings({ back, toast }) {
   const p = useStore((s) => s.profile);
   const connected = useStore((s) => s.healthConnected);
+  useStore((s) => s.lastBackup);
+  const age = backupAgeDays();
   const [key, setKey] = useState(p.apiKey);
   const [gkey, setGkey] = useState(p.geminiKey || '');
   const [testing, setTesting] = useState(false);
@@ -143,13 +146,24 @@ export default function Settings({ back, toast }) {
         <p className="tiny muted">Non-veg mode will arrive in a future version — the data model already supports it.</p>
       </Card>
 
-      <Card>
-        <h3>💾 Data</h3>
-        <p className="tiny muted">All data stays on this phone. No account, no cloud.</p>
-        <div className="row gap">
-          <Button variant="ghost" onClick={exportData}>Export backup</Button>
-          <Button variant="danger" onClick={() => { if (confirm('Delete all logged days? Profile is kept.')) { setState({ days: {}, weights: [] }); toast('Cleared'); } }}>Clear history</Button>
+      <Card glow="#ffd166">
+        <h3>💾 Backup & restore</h3>
+        <p className="small muted">Uninstalling Android apps deletes their data. Keep a backup so your history, profile and plan come back on reinstall or a new phone.</p>
+        <div className="backup-row">
+          <span className="tiny muted grow">Last backup: <b className="white">{age == null ? "never" : age === 0 ? "today" : age + " days ago"}</b></span>
+          {age == null || age > 7 ? <Pill color="#ff6b6b">due</Pill> : <Pill color="#00f5a0">safe</Pill>}
         </div>
+        <div className="row gap" style={{ marginTop: 10 }}>
+          <Button className="grow" onClick={async () => { try { await backupNow(); toast("✅ Backup created — save it to Google Drive or WhatsApp"); } catch (e) { toast("❌ " + String(e?.message || e).slice(0, 80)); } }}>⬆️ Back up now</Button>
+          <Button variant="ghost" onClick={async () => { try { const r = await pickAndRestore(); if (r) toast(`✅ Restored ${r.days} days of history`); } catch (e) { toast("❌ " + String(e?.message || e)); } }}>⬇️ Restore</Button>
+        </div>
+        <ul className="list tiny muted">
+          <li>☁️ Tap <b>Back up now</b> → choose <b>Google Drive</b> (or WhatsApp → Message yourself)</li>
+          <li>📲 After reinstalling: on the first screen tap <b>Restore from backup</b> and pick that file</li>
+          <li>🔄 Android Google Backup also restores automatically if it’s on: Settings → Google → Backup → “Back up to Google Drive” ON</li>
+          <li>🔒 AI keys are not stored in backups — paste them again after restoring</li>
+        </ul>
+        <Button variant="danger" onClick={() => { if (confirm("Delete all logged days? Profile is kept.")) { setState({ days: {}, weights: [] }); toast("Cleared"); } }}>Clear history</Button>
       </Card>
       <div className="tiny muted center-text">VegVital 1.0 · made for you 💚</div>
       <div style={{ height: 110 }} />
@@ -169,6 +183,17 @@ function Toggle({ label, on, set }) {
 export function Onboarding({ done }) {
   const p = useStore((s) => s.profile);
   const [step, setStep] = useState(0);
+  const [rmsg, setRmsg] = useState('');
+  const restore = async () => {
+    tap();
+    try {
+      const r = await pickAndRestore();
+      if (!r) return;
+      if (await healthAvailable()) await connectHealth();
+      scheduleReminders();
+      done();
+    } catch (e) { setRmsg(String(e?.message || e)); }
+  };
   const slides = [
     { e: '🌱', t: 'Your veg health coach', d: 'Breakfast to dinner, sleep, work and workouts — tracked in one place.' },
     { e: '📸', t: 'Snap. Done.', d: 'Take a photo of your plate — AI counts calories, protein, carbs, fat and fibre for you.' },
@@ -209,6 +234,8 @@ export function Onboarding({ done }) {
       </AnimatePresence>
       <div className="dots">{[0, 1, 2, 3].map((k) => <motion.i key={k} animate={{ width: k === step ? 22 : 8, opacity: k === step ? 1 : 0.4 }} />)}</div>
       <Button className="full" onClick={next}>{step < slides.length ? 'Next →' : 'Start my journey 🚀'}</Button>
+      <button className="restore-link" onClick={restore}>♻️ Already used VegVital? <b>Restore from backup</b></button>
+      {rmsg && <div className="tiny warn center-text" style={{ position: 'relative' }}>⚠️ {rmsg}</div>}
     </div>
   );
 }

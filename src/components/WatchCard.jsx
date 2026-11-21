@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { useStore } from '../lib/store.js';
 import { connectHealth, syncHealth } from '../lib/auto.js';
 import { Card, Pill, Sparkline, CountUp, Button } from './ui.jsx';
+import WatchGuide from './WatchGuide.jsx';
 
 const ago = (iso) => {
   if (!iso) return 'never';
@@ -15,6 +16,8 @@ export default function WatchCard() {
   const w = useStore((s) => s.watch) || {};
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
+  const [guide, setGuide] = useState(false);
+  const guideEl = <WatchGuide open={guide} onClose={() => setGuide(false)} />;
 
   const connect = async () => {
     setBusy(true);
@@ -26,6 +29,7 @@ export default function WatchCard() {
 
   if (!connected) {
     return (
+      <>
       <Card className="watch" glow="#ff6b6b">
         <div className="row gap center-v">
           <motion.div className="watch-ico" animate={{ rotate: [0, -8, 8, 0] }} transition={{ repeat: Infinity, duration: 3 }}>⌚</motion.div>
@@ -35,13 +39,17 @@ export default function WatchCard() {
           </div>
         </div>
         <Button className="full" onClick={connect} disabled={busy}>{busy ? 'Connecting…' : 'Connect via Health Connect'}</Button>
+        <button className="tiny link watch-help" onClick={() => setGuide(true)}>Noise, boAt, Fire-Boltt or other watch? See setup steps →</button>
         {msg && <div className="tiny warn" style={{ marginTop: 8 }}>⚠️ {msg}. Make sure your watch app (Samsung Health, Google Fit, Fitbit, Zepp, Noise/boAt…) has Health Connect sync turned on.</div>}
       </Card>
+      {guideEl}
+      </>
     );
   }
 
   const beat = w.hr ? 60 / w.hr : 1;
   return (
+    <>
     <Card className="watch" glow="#ff6b6b">
       <div className="row-between">
         <span className="b">⌚ {w.device || 'Smartwatch'}</span>
@@ -67,7 +75,9 @@ export default function WatchCard() {
         <div><span className="tiny muted">HRV</span><b>{w.hrv ?? '—'}</b><span className="tiny muted">ms</span></div>
         <div><span className="tiny muted">Distance</span><b>{w.km ?? '—'}</b><span className="tiny muted">km</span></div>
       </div>
-      <div className="tiny muted" style={{ marginTop: 8 }}>🔁 Two-way sync on · food, water & workouts are sent to your watch app</div>
+      <div className="row-between" style={{ marginTop: 8 }}><span className="tiny muted">🔁 Two-way sync on</span><button className="tiny link" onClick={() => setGuide(true)}>Watch setup help</button></div>
     </Card>
+    {guideEl}
+    </>
   );
 }
