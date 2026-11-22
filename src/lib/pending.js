@@ -8,6 +8,7 @@ import { analyzeWithProfile, activeProvider, shrinkImage } from './ai.js';
 import { MEAL_SLOTS } from '../data/plan.js';
 import { sumNutrition } from '../data/foods.js';
 import { newPhotoId, savePhotoFile, loadPhotoB64, addDiary, updateDiary, slotAt } from './photos.js';
+import { photoTakenAt } from './photoDate.js';
 
 const MAX_TRIES = 60;
 const MAX_AGE_MS = 7 * 86400e3;
@@ -96,25 +97,18 @@ function exifDate(exif) {
 
 /** Let the user pick many food photos; each is stored and queued for the AI. Returns how many were added. */
 export async function importGalleryPhotos() {
+  // The original files are read (not a resized copy) so the date the photo was TAKEN is known:
+  // yesterday's lunch photo goes into yesterday's lunch, not today.
+  const files = await new Promise((resolve) => {
+    const input = document.createElement('input');
+    input.type = 'file'; input.accept = 'image/*'; input.multiple = true;
+    input.onchange = () => resolve([...(input.files || [])]);
+    input.addEventListener('cancel', () => resolve([]));
+    input.click();
+  });
   let picked = []; // [{dataUrl, date}]
-  if (Capacitor.isNativePlatform()) {
-    const res = await Camera.pickImages({ quality: 80, width: 1280, limit: 30 });
-    for (const p of res.photos || []) {
-      const blob = await (await fetch(p.webPath)).blob();
-      picked.push({ dataUrl: await blobToDataUrl(blob), date: exifDate(p.exif) || new Date() });
-    }
-  } else {
-    picked = await new Promise((resolve) => {
-      const input = document.createElement('input');
-      input.type = 'file'; input.accept = 'image/*'; input.multiple = true;
-      input.onchange = async () => {
-        const out = [];
-        for (const f of input.files || []) out.push({ dataUrl: await blobToDataUrl(f), date: new Date(f.lastModified || Date.now()) });
-        resolve(out);
-      };
-      input.click();
-    });
-  }
+  for (const f of files.slice(0, 40)) picked.push({ dataUrl: await blobToDataUrl(f), date: await photoTakenAt(f) });
+
   for (const p of picked) {
     const small = await shrinkImage(p.dataUrl, 768);
     const photoId = newPhotoId();

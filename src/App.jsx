@@ -8,6 +8,7 @@ import Food from './screens/Food.jsx';
 import Scan from './screens/Scan.jsx';
 import Move, { Confetti } from './screens/Move.jsx';
 import Insights from './screens/Insights.jsx';
+import History from './screens/History.jsx';
 import Settings, { Onboarding } from './screens/Settings.jsx';
 import { Toast, tap } from './components/ui.jsx';
 
@@ -15,6 +16,7 @@ const TABS = [
   ['home', 'Today', '◉'],
   ['food', 'Food', '🍽'],
   ['scan', '', '📸'],
+  ['history', 'History', '📅'],
   ['move', 'Move', '⚡'],
   ['insights', 'Stats', '📊'],
 ];
@@ -62,6 +64,7 @@ export default function App() {
           {tab === 'food' && <Food openScan={(slot) => go('scan', slot)} />}
           {tab === 'move' && <Move startId={moveStart} clearStart={() => setMoveStart(null)} />}
           {tab === 'insights' && <Insights />}
+          {tab === 'history' && <History toast={setToast} />}
           {tab === 'settings' && <Settings back={() => setTab(prev === 'settings' ? 'home' : prev)} toast={setToast} />}
         </motion.main>
       </AnimatePresence>

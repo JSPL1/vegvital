@@ -46,7 +46,7 @@ export async function cloudThumb(id) {
   const q = sql(); if (!q) return null;
   await ensureTable(q);
   const r = await q.query('SELECT thumb, CASE WHEN thumb IS NULL THEN image END AS image FROM food_photos WHERE id = $1', [id]);
-  return r[0] ? { thumb: r[0].thumb, image: r[0].image } : null;
+  return r[0] ? { thumb: r[0].thumb, image: r[0].image } : { missing: true };
 }
 
 export async function cloudSetThumb(id, thumb) {
@@ -62,11 +62,11 @@ export async function syncPhotos(loadLocal, afterUpload) {
   syncing = true;
   try {
     await ensureTable(q);
-    const all = Object.values(getState().photos || {}).flat().filter((p) => !p.cloud || p.cloudDirty);
+    const all = Object.values(getState().photos || {}).flat().filter((p) => (!p.cloud && !p.lost) || p.cloudDirty);
     for (const p of all) {
       if (!p.cloud) {
         const { img, thumb } = await loadLocal(p.id);
-        if (!img) { mark(p.id, { cloud: true, cloudDirty: false }); continue; }
+        if (!img) { mark(p.id, { lost: true, cloudDirty: false }); continue; }
         await q.query(
           `INSERT INTO food_photos (id, day, slot, taken_at, status, name, kcal, image, thumb) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
            ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, name = EXCLUDED.name, kcal = EXCLUDED.kcal, slot = EXCLUDED.slot, thumb = COALESCE(food_photos.thumb, EXCLUDED.thumb)`,

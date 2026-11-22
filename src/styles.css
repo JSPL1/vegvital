@@ -200,7 +200,7 @@ main { position: relative; }
 
 /* tab bar */
 .tabbar { position: fixed; left: 12px; right: 12px; bottom: calc(12px + var(--safe-bottom)); max-width: 520px; margin: 0 auto; height: 70px; display: flex; align-items: center; justify-content: space-around; background: rgba(13, 20, 36, .82); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); border: 1px solid var(--card-b); border-radius: 26px; z-index: 40; box-shadow: 0 20px 50px rgba(0,0,0,.5); }
-.tab { position: relative; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 12px; color: var(--muted); font-size: 11px; }
+.tab { position: relative; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 7px; color: var(--muted); font-size: 11px; }
 .tab.on { color: var(--text); }
 .tab-icon { font-size: 20px; position: relative; z-index: 1; }
 .tab-label { position: relative; z-index: 1; font-weight: 600; }
@@ -362,3 +362,6 @@ main { position: relative; }
 .yp-item img, .yp-item span { width: 64px; height: 64px; border-radius: 12px; object-fit: cover; display: grid; place-items: center; background: rgba(255,255,255,.06); }
 .yp-item small { font-size: 10px; opacity: .7; }
 .hist-day .photo-diary { margin: 4px 0 0; padding: 8px; background: rgba(255,255,255,.03); box-shadow: none; }
+
+.pd-ph { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.pd-ph small { position: static !important; font-size: 9px; background: none !important; }

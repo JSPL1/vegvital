@@ -14,9 +14,9 @@ function Thumb({ p, onOpen }) {
   const src = usePhoto(p.id, { thumb: true });
   return (
     <motion.button className="pd-thumb" whileTap={{ scale: 0.92 }} onClick={() => { tap(); onOpen(p); }}>
-      {src ? <img src={src} alt="" /> : <span className="pd-ph">🍽</span>}
+      {src ? <img src={src} alt="" /> : <span className="pd-ph">{p.lost ? '🚫' : '☁️'}<small>{p.lost ? 'photo lost' : 'loading'}</small></span>}
       <i className={`pd-badge ${p.status}`}>{BADGE[p.status] || '⏳'}</i>
-      {p.cloud && <i className="pd-cloud">☁️</i>}
+      {p.cloud && !p.lost && <i className="pd-cloud">☁️</i>}
       <small>{p.kcal ? `${p.kcal} kcal` : MEAL_SLOTS.find((s) => s.key === p.slot)?.label}</small>
     </motion.button>
   );
@@ -77,7 +77,7 @@ export default function PhotoDiary({ dayKey = todayKey(), toast, compact }) {
       <Sheet open={!!open} onClose={() => setOpen(null)} title={open?.name || 'Food photo'}>
         {open && (
           <div className="col gap">
-            {big && <img src={big} alt="" className="pd-big" />}
+            {big ? <img src={big} alt="" className="pd-big" /> : <div className="tiny muted">{open.lost ? '🚫 This picture was never uploaded and was removed with the old app, so it can’t be shown. Its food details are kept. Add it again from the gallery if you still have it.' : '☁️ Loading photo from your cloud…'}</div>}
             <div className="small">
               {MEAL_SLOTS.find((s) => s.key === open.slot)?.icon} {MEAL_SLOTS.find((s) => s.key === open.slot)?.label} · {fmtTime(open.time)}
               {open.kcal ? ` · ${open.kcal} kcal` : ''}

@@ -59,6 +59,7 @@ async function loadThumb(id) {
   if (cloudOn()) {
     try {
       const r = await cloudThumb(id);
+      if (r?.missing) { const loc = await readLocal(id); if (!loc) updateDiary(id, { lost: true }, true); }
       if (r?.thumb) { const u = 'data:image/jpeg;base64,' + r.thumb; cache.set(id + '_t', u); return u; }
       if (r?.image) {
         cache.set(id, 'data:image/jpeg;base64,' + r.image);
@@ -77,11 +78,18 @@ export function usePhoto(id, { thumb = false } = {}) {
   const key = thumb ? id + '_t' : id;
   const [src, setSrc] = useState(() => (id ? cache.get(key) || null : null));
   useEffect(() => {
-    let live = true;
+    let live = true, timer = null, tries = 0;
     if (!id) { setSrc(null); return undefined; }
-    if (cache.get(key)) setSrc(cache.get(key));
-    else (thumb ? loadThumb(id) : loadPhotoB64(id).then((b) => b && 'data:image/jpeg;base64,' + b)).then((u) => live && u && setSrc(u));
-    return () => { live = false; };
+    const load = () => {
+      if (cache.get(key)) { setSrc(cache.get(key)); return; }
+      (thumb ? loadThumb(id) : loadPhotoB64(id).then((b) => b && 'data:image/jpeg;base64,' + b)).then((u) => {
+        if (!live) return;
+        if (u) setSrc(u);
+        else if (++tries < 4) timer = setTimeout(load, 4000 * tries); // network hiccup: try again
+      });
+    };
+    load();
+    return () => { live = false; clearTimeout(timer); };
   }, [id, thumb]);
   return src;
 }
