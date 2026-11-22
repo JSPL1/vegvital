@@ -10,6 +10,7 @@ import { Motion } from '@capacitor/motion';
 import { App } from '@capacitor/app';
 import { autoBackup } from './backup.js';
 import { runCloudSync } from './photos.js';
+import { pullAll } from './cloud.js';
 import { Health } from '@capgo/capacitor-health';
 import { getState, setState, updateDay, todayKey, getDay } from './store.js';
 import { planForDate, MEAL_SLOTS } from '../data/plan.js';
@@ -328,6 +329,7 @@ export async function scheduleReminders() {
 export async function startAutomation() {
   setTimeout(autoBackup, 15000);
   setTimeout(runCloudSync, 10000);
+  setTimeout(pullAll, 6000);
   setInterval(runCloudSync, 5 * 60000);
   setInterval(autoBackup, 3600e3);
   inferSleepFromInactivity();

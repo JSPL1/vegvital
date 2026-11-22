@@ -3,6 +3,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useStore, updateDay, todayKey, emptyDay } from '../lib/store.js';
 import { FOODS, CATEGORIES, healthScore, sumNutrition, findFood } from '../data/foods.js';
 import { usePhoto } from '../lib/photos.js';
+import { pullAll } from '../lib/cloud.js';
+import PhotoDiary from '../components/PhotoDiary.jsx';
+import { useEffect } from 'react';
 import { MEAL_SLOTS, planForDate, DAILY_RULES } from '../data/plan.js';
 import { GUIDE } from '../data/guide.js';
 import { Card, stagger, rise, Sheet, Button, Pill, tap } from '../components/ui.jsx';
@@ -178,6 +181,7 @@ function Chart() {
             </div>
             {pick.tags?.length > 0 && <div className="tiny warn">⚠️ {pick.tags.join(', ')} — have occasionally</div>}
             <Story food={pick} />
+            <YourPhotos food={pick} />
             <div className="tiny muted">Add to today:</div>
             <div className="row gap wrap">
               {MEAL_SLOTS.map((s) => <Button key={s.key} variant="ghost" onClick={() => add(s.key)}>{s.icon} {s.label}</Button>)}
@@ -201,17 +205,46 @@ function Story({ food }) {
 
 const SRC = { photo: '📸 photo', plan: '✓ plan', 'plan-auto': 'auto', manual: '✍️ added' };
 
-function MealThumb({ id }) {
-  const src = usePhoto(id, { thumb: true });
-  return src ? <img className="hist-thumb" src={src} alt="" /> : null;
+function MiniPhoto({ p, onOpen }) {
+  const src = usePhoto(p.id, { thumb: true });
+  return (
+    <button className="yp-item" onClick={() => onOpen(p)}>
+      {src ? <img src={src} alt="" /> : <span>🍽</span>}
+      <small>{new Date(p.time).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}</small>
+    </button>
+  );
+}
+
+function BigPhoto({ id }) {
+  const src = usePhoto(id);
+  return src ? <img src={src} alt="" className="pd-big" /> : <div className="tiny muted">Loading photo from cloud…</div>;
+}
+
+/** The user's own photos of this food, from every day (pictures come from the cloud). */
+function YourPhotos({ food }) {
+  const photos = useStore((s) => s.photos) || {};
+  const [big, setBig] = useState(null);
+  const mine = Object.values(photos).flat()
+    .filter((p) => p.name && (p.name.toLowerCase() === food.name.toLowerCase() || findFood(p.name)?.id === food.id))
+    .sort((a, b) => new Date(b.time) - new Date(a.time));
+  if (!mine.length) return null;
+  return (
+    <div className="col gap">
+      <div className="tiny b">📷 Your photos of this food ({mine.length})</div>
+      <div className="yp-strip">{mine.slice(0, 30).map((p) => <MiniPhoto key={p.id} p={p} onOpen={(x) => { tap(); setBig(big?.id === x.id ? null : x); }} />)}</div>
+      {big && <BigPhoto id={big.id} />}
+    </div>
+  );
 }
 
 function History() {
-  const days = useStore((s) => s.days);
+  const days = useStore((s) => s.days) || {};
+  const photos = useStore((s) => s.photos) || {};
   const [limit, setLimit] = useState(14);
   const [pick, setPick] = useState(null);
-  const keys = Object.keys(days || {})
-    .filter((k) => Object.keys(days[k]?.meals || {}).length || (days[k]?.extra || []).length)
+  useEffect(() => { pullAll(); }, []);
+  const keys = [...new Set([...Object.keys(days), ...Object.keys(photos)])]
+    .filter((k) => Object.keys(days[k]?.meals || {}).length || (days[k]?.extra || []).length || (photos[k] || []).length)
     .sort().reverse();
   const fmt = (k) => new Date(k + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
   const tm = (t) => (t ? new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '');
@@ -225,12 +258,13 @@ function History() {
         <div className="tiny muted right">Since<br /><b>{fmt(keys[keys.length - 1])}</b></div>
       </Card>
       {keys.slice(0, limit).map((k) => {
-        const d = days[k];
+        const d = days[k] || {};
         const meals = [
           ...MEAL_SLOTS.filter((s) => d.meals?.[s.key]).map((s) => ({ ...d.meals[s.key], label: s.label, icon: s.icon })),
           ...(d.extra || []).map((e) => ({ ...e, label: e.label || 'Extra', icon: '➕' })),
         ];
         const tot = sumNutrition(meals.flatMap((m) => m.items || []));
+        if (!tot.kcal) tot.kcal = (photos[k] || []).reduce((a, p) => a + (Number(p.kcal) || 0), 0);
         return (
           <Card key={k} className="hist-day">
             <div className="row-between">
@@ -238,10 +272,10 @@ function History() {
               <span className="kcal-chip">{Math.round(tot.kcal)}<small>kcal</small></span>
             </div>
             <div className="tiny muted">P {Math.round(tot.p)}g · C {Math.round(tot.c)}g · F {Math.round(tot.f)}g · Fibre {Math.round(tot.fb)}g</div>
+            <PhotoDiary dayKey={k} compact />
             {meals.map((m, i) => (
               <div key={i} className="hist-meal">
                 <div className="row gap">
-                  {m.photoId && <MealThumb id={m.photoId} />}
                   <div className="tiny b grow">{m.icon} {m.label}{m.time ? ` · ${tm(m.time)}` : ''} {SRC[m.source] ? <span className="muted">· {SRC[m.source]}</span> : null}</div>
                 </div>
                 {(m.items || []).map((it, j) => (
@@ -267,6 +301,7 @@ function History() {
               ))}
             </div>
             <Story food={pick} />
+            <YourPhotos food={pick} />
           </div>
         )}
       </Sheet>

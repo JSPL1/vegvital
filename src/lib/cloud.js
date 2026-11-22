@@ -1,6 +1,6 @@
 // Cloud photo store on Neon (free Postgres). Each food photo is saved in the app first, then
-// uploaded here. Once it is safely in the cloud (and the AI has read it) the phone keeps only
-// a tiny thumbnail; the full photo is fetched from Neon when you open it — on any device.
+// uploaded here (full photo + small thumbnail). Once it is safely in the cloud the phone deletes
+// both; pictures are fetched from Neon when shown — on any device.
 import { neon } from '@neondatabase/serverless';
 import { getState, setState } from './store.js';
 
@@ -21,6 +21,7 @@ async function ensureTable(q) {
     id text PRIMARY KEY, day text NOT NULL, slot text, taken_at timestamptz, status text,
     name text, kcal int, image text, created_at timestamptz DEFAULT now())`);
   await q.query('CREATE INDEX IF NOT EXISTS food_photos_day ON food_photos(day)');
+  await q.query('ALTER TABLE food_photos ADD COLUMN IF NOT EXISTS thumb text');
   tableReady = true;
 }
 
@@ -40,7 +41,20 @@ export async function cloudImage(id) {
   return r[0]?.image || null;
 }
 
-/** Upload new photos and changed details. `loadLocal(id)` returns local base64 or null; `afterUpload(entry)` lets the caller free local space. */
+/** Small picture for lists; falls back to the full photo for very old uploads. */
+export async function cloudThumb(id) {
+  const q = sql(); if (!q) return null;
+  await ensureTable(q);
+  const r = await q.query('SELECT thumb, CASE WHEN thumb IS NULL THEN image END AS image FROM food_photos WHERE id = $1', [id]);
+  return r[0] ? { thumb: r[0].thumb, image: r[0].image } : null;
+}
+
+export async function cloudSetThumb(id, thumb) {
+  const q = sql(); if (!q) return;
+  await q.query('UPDATE food_photos SET thumb = $2 WHERE id = $1', [id, thumb]);
+}
+
+/** Upload new photos and changed details. `loadLocal(id)` returns {img, thumb} base64 from the phone; `afterUpload(entry)` lets the caller free local space. */
 export async function syncPhotos(loadLocal, afterUpload) {
   const q = sql();
   if (!q || syncing) return;
@@ -51,12 +65,12 @@ export async function syncPhotos(loadLocal, afterUpload) {
     const all = Object.values(getState().photos || {}).flat().filter((p) => !p.cloud || p.cloudDirty);
     for (const p of all) {
       if (!p.cloud) {
-        const img = await loadLocal(p.id);
+        const { img, thumb } = await loadLocal(p.id);
         if (!img) { mark(p.id, { cloud: true, cloudDirty: false }); continue; }
         await q.query(
-          `INSERT INTO food_photos (id, day, slot, taken_at, status, name, kcal, image) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-           ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, name = EXCLUDED.name, kcal = EXCLUDED.kcal, slot = EXCLUDED.slot`,
-          [p.id, p.day, p.slot, p.time, p.status, p.name || null, p.kcal || null, img],
+          `INSERT INTO food_photos (id, day, slot, taken_at, status, name, kcal, image, thumb) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+           ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, name = EXCLUDED.name, kcal = EXCLUDED.kcal, slot = EXCLUDED.slot, thumb = COALESCE(food_photos.thumb, EXCLUDED.thumb)`,
+          [p.id, p.day, p.slot, p.time, p.status, p.name || null, p.kcal || null, img, thumb || null],
         );
       } else {
         await q.query('UPDATE food_photos SET status=$2, name=$3, kcal=$4, slot=$5 WHERE id=$1', [p.id, p.status, p.name || null, p.kcal || null, p.slot]);
@@ -72,25 +86,39 @@ export async function syncPhotos(loadLocal, afterUpload) {
   }
 }
 
+function mergeRows(rows) {
+  const s = getState();
+  const photos = { ...(s.photos || {}) };
+  const known = new Set(Object.values(photos).flat().map((p) => p.id));
+  let added = 0;
+  for (const r of rows) {
+    if (known.has(r.id)) continue;
+    const list = [...(photos[r.day] || [])];
+    list.push({ id: r.id, day: r.day, slot: r.slot, time: new Date(r.taken_at || r.created_at || Date.now()).toISOString(), status: r.status, name: r.name, kcal: r.kcal, cloud: true, remote: true, gone: true });
+    list.sort((a, b) => new Date(a.time) - new Date(b.time));
+    photos[r.day] = list;
+    added++;
+  }
+  if (added) setState({ photos });
+  return added;
+}
+
 /** Photos saved from another phone/PC show up here too. */
 export async function pullDay(day) {
   const q = sql(); if (!q) return;
   try {
     await ensureTable(q);
-    const rows = await q.query('SELECT id, day, slot, taken_at, status, name, kcal FROM food_photos WHERE day = $1 ORDER BY taken_at', [day]);
-    const s = getState();
-    const list = [...((s.photos || {})[day] || [])];
-    let added = 0;
-    for (const r of rows) {
-      if (list.some((p) => p.id === r.id)) continue;
-      list.push({ id: r.id, day: r.day, slot: r.slot, time: new Date(r.taken_at).toISOString(), status: r.status, name: r.name, kcal: r.kcal, cloud: true, remote: true });
-      added++;
-    }
-    if (added) {
-      list.sort((a, b) => new Date(a.time) - new Date(b.time));
-      setState({ photos: { ...(s.photos || {}), [day]: list } });
-    }
+    mergeRows(await q.query('SELECT id, day, slot, taken_at, created_at, status, name, kcal FROM food_photos WHERE day = $1', [day]));
   } catch (e) { setState({ cloudErr: String(e?.message || e).slice(0, 140) }); }
+}
+
+/** Every photo ever uploaded (details only, no pictures) — brings old photos back after a reinstall. */
+export async function pullAll() {
+  const q = sql(); if (!q) return 0;
+  try {
+    await ensureTable(q);
+    return mergeRows(await q.query('SELECT id, day, slot, taken_at, created_at, status, name, kcal FROM food_photos ORDER BY day'));
+  } catch (e) { setState({ cloudErr: String(e?.message || e).slice(0, 140) }); return 0; }
 }
 
 export async function cloudDelete(id) {

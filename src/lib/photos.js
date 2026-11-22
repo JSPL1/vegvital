@@ -1,12 +1,13 @@
-// Photo diary: every food photo is kept inside the app (private app storage on the phone,
-// localStorage in the browser). The day list lives in state.photos; image bytes live in files.
+// Photo diary. A new photo is saved on the phone only until it reaches the Neon cloud; then the
+// phone copy (full + thumbnail) is deleted and pictures are loaded from the cloud when shown.
+// The day list (details, no pictures) lives in state.photos.
 import { useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { getState, setState, todayKey } from './store.js';
 import { MEAL_SLOTS } from '../data/plan.js';
 import { shrinkImage } from './ai.js';
-import { cloudImage, syncPhotos, cloudDelete, cloudOn } from './cloud.js';
+import { cloudImage, cloudThumb, cloudSetThumb, syncPhotos, cloudDelete, cloudOn } from './cloud.js';
 
 const native = Capacitor.isNativePlatform();
 const cache = new Map();
@@ -55,7 +56,20 @@ async function loadThumb(id) {
   if (c) return c;
   const b = await readLocal(id + '_t');
   if (b) { const u = 'data:image/jpeg;base64,' + b; cache.set(id + '_t', u); return u; }
-  const full = await loadPhotoB64(id);
+  if (cloudOn()) {
+    try {
+      const r = await cloudThumb(id);
+      if (r?.thumb) { const u = 'data:image/jpeg;base64,' + r.thumb; cache.set(id + '_t', u); return u; }
+      if (r?.image) {
+        cache.set(id, 'data:image/jpeg;base64,' + r.image);
+        const t = await shrinkImage('data:image/jpeg;base64,' + r.image, 220);
+        cache.set(id + '_t', t.dataUrl);
+        cloudSetThumb(id, t.base64).catch(() => {});
+        return t.dataUrl;
+      }
+    } catch { /* offline */ }
+  }
+  const full = await loadPhotoB64(id, { localOnly: true });
   return full ? 'data:image/jpeg;base64,' + full : null;
 }
 
@@ -72,9 +86,11 @@ export function usePhoto(id, { thumb = false } = {}) {
   return src;
 }
 
-// ---- cloud sync: upload, then keep only the thumbnail on the phone ----
-const FINAL = ['done', 'logged', 'notfood'];
+// ---- cloud sync: upload, then delete the phone copy ----
 let syncTimer = null;
+async function freeLocal(id) {
+  await removeLocal(id); await removeLocal(id + '_t');
+}
 export function cloudSyncSoon(ms = 1500) {
   if (!cloudOn()) return;
   clearTimeout(syncTimer);
@@ -82,14 +98,20 @@ export function cloudSyncSoon(ms = 1500) {
 }
 export async function runCloudSync() {
   if (!cloudOn()) return;
-  await syncPhotos((id) => loadPhotoB64(id, { localOnly: true }), async (p) => {
-    if (FINAL.includes(p.status)) { await removeLocal(p.id); cache.delete(p.id); }
+  await syncPhotos(async (id) => ({ img: await loadPhotoB64(id, { localOnly: true }), thumb: await readLocal(id + '_t') }), async (p) => {
+    await freeLocal(p.id);
+    updateDiary(p.id, { gone: true }, true);
   });
-  // photos uploaded earlier whose AI result came later: free their space too
+  if (getState().cloudErr) return;
+  // photos uploaded by older versions: send the thumbnail up, then delete both from the phone
   const s = getState();
-  for (const p of Object.values(s.photos || {}).flat()) if (p.cloud && !p.cloudDirty && FINAL.includes(p.status) && !p.slim) {
-    await removeLocal(p.id); cache.delete(p.id);
-    updateDiary(p.id, { slim: true }, true);
+  for (const p of Object.values(s.photos || {}).flat()) if (p.cloud && !p.gone) {
+    try {
+      const t = await readLocal(p.id + '_t');
+      if (t) await cloudSetThumb(p.id, t);
+      await freeLocal(p.id);
+      updateDiary(p.id, { gone: true }, true);
+    } catch { break; }
   }
 }
 

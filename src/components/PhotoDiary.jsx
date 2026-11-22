@@ -31,7 +31,7 @@ export default function PhotoDiary({ dayKey = todayKey(), toast, compact }) {
   const cloud = useStore((s) => !!(s.profile.neonUrl || '').trim());
   const cloudErr = useStore((s) => s.cloudErr);
   const unsynced = list.filter((p) => !p.cloud).length;
-  useEffect(() => { if (cloud) { pullDay(dayKey); runCloudSync(); } }, [cloud, dayKey]);
+  useEffect(() => { if (cloud && !compact) { pullDay(dayKey); runCloudSync(); } }, [cloud, dayKey, compact]);
   const [busy, setBusy] = useState(false);
   const big = usePhoto(open?.id);
 
@@ -52,7 +52,7 @@ export default function PhotoDiary({ dayKey = todayKey(), toast, compact }) {
     <Card className="photo-diary">
       <div className="row-between">
         <h3>📷 Food photos</h3>
-        {!compact && <button className="chipbtn on" disabled={busy} onClick={add}>{busy ? 'Saving…' : '＋ Add photos'}</button>}
+        {compact ? <span className="tiny muted">{list.length} photo{list.length > 1 ? 's' : ''}</span> : <button className="chipbtn on" disabled={busy} onClick={add}>{busy ? 'Saving…' : '＋ Add photos'}</button>}
       </div>
       {list.length ? (
         <div className="pd-strip">{list.map((p) => <Thumb key={p.id} p={p} onOpen={setOpen} />)}</div>
