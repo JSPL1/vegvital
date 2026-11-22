@@ -349,3 +349,10 @@ main { position: relative; }
 .update-banner b { display: block; font-size: 14px; }
 .update-banner .grow { flex: 1; }
 .pd-cloud { position: absolute; top: 5px; left: 5px; font-style: normal; font-size: 11px; width: 20px; height: 20px; display: grid; place-items: center; border-radius: 50%; background: rgba(0,0,0,.5); }
+
+/* food history + stories */
+.story { background: rgba(255, 209, 102, 0.08); border: 1px solid rgba(255, 209, 102, 0.25); border-radius: 14px; padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; }
+.hist-day { display: flex; flex-direction: column; gap: 6px; }
+.hist-meal { border-top: 1px solid rgba(255, 255, 255, 0.06); padding-top: 6px; }
+.hist-meal .item { cursor: pointer; }
+.hist-thumb { width: 34px; height: 34px; border-radius: 8px; object-fit: cover; }

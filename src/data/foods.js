@@ -1,11 +1,12 @@
 // Vegetarian food database (no meat, no fish, no eggs, no alcohol).
 // Values per listed serving. kcal, protein (p), carbs (c), fat (f), fibre (fb) in grams.
 // Sources: IFCT 2017 / USDA approximations for typical home-cooked Indian portions.
+import { INDIAN_FOODS, FOOD_HISTORY } from './indianFoods.js';
 const F = (id, name, emoji, serving, kcal, p, c, f, fb, cat, tags = []) => ({
   id, name, emoji, serving, kcal, p, c, f, fb, cat, tags,
 });
 
-export const FOODS = [
+const BASE_FOODS = [
   // ---- Nuts, seeds & morning drinks
   F('almond_soaked', 'Soaked almonds', '🌰', '35 g (~25 pcs)', 203, 7.4, 7.6, 17.5, 4.4, 'Nuts'),
   F('walnut_soaked', 'Soaked walnuts', '🥜', '10 g (2 halves)', 65, 1.5, 1.4, 6.5, 0.7, 'Nuts'),
@@ -181,6 +182,29 @@ export const FOODS = [
   F('ladoo', 'Besan ladoo', '🟡', '1 pc', 185, 3.5, 20, 10, 1, 'Sweets', ['sugary']),
   F('ice_cream', 'Ice cream', '🍨', '1 scoop (70 g)', 145, 2.5, 17, 7.5, 0.5, 'Sweets', ['sugary']),
 ];
+
+const ids = new Set(BASE_FOODS.map((f) => f.id));
+export const FOODS = [
+  ...BASE_FOODS.map((f) => (FOOD_HISTORY[f.id] ? { ...f, region: FOOD_HISTORY[f.id][0], about: FOOD_HISTORY[f.id][1] } : f)),
+  ...INDIAN_FOODS.filter((f) => !ids.has(f.id)),
+];
+
+/** Best match in the food list for a free-text dish name (used to show its story). */
+export function findFood(name) {
+  const n = (name || '').toLowerCase().replace(/[^a-z ]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!n) return null;
+  let best = null, bestScore = 0;
+  for (const f of FOODS) {
+    const fn = f.name.toLowerCase().replace(/[^a-z ]/g, ' ').replace(/\s+/g, ' ').trim();
+    let sc = 0;
+    if (fn === n) sc = 100;
+    else if (fn.includes(n) || n.includes(fn.split(' (')[0])) sc = 60;
+    else { const w = n.split(' ').filter((x) => x.length > 3); sc = w.filter((x) => fn.includes(x)).length * 20; }
+    if (f.about) sc += 1;
+    if (sc > bestScore) { bestScore = sc; best = f; }
+  }
+  return bestScore >= 40 ? best : null;
+}
 
 export const FOOD_BY_ID = Object.fromEntries(FOODS.map((f) => [f.id, f]));
 

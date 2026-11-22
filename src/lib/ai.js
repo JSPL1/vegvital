@@ -46,7 +46,7 @@ They follow a ~1650 kcal/day nutritionist plan focused on fat loss: high protein
 
 From the photo, identify every distinct food/drink item, estimate the portion actually on the plate
 (use plate/katori/roti size cues; typical Indian home portions), and give realistic nutrition per item
-for that portion, accounting for visible oil/ghee/butter. Prefer Indian dish names (e.g. "Dal tadka", "Bhindi masala").
+for that portion, accounting for visible oil/ghee/butter. Prefer Indian dish names (e.g. "Dal tadka", "Bhindi masala"), including regional ones: Odia (Dahibara aludam, Gupchup, Pakhala bhata, Dalma, Chhena poda, Bara ghuguni, Pitha), South Indian (Idli, Dosa, Pesarattu, Pongal, Bisi bele bath, Avial) and street chaat (Golgappa, Papdi chaat, Samosa, Dabeli, Misal pav).
 If something looks like it could be meat/egg/fish, set contains_non_veg=true and name it honestly.
 If the photo shows no food, set is_food=false and return an empty items list.
 Keep verdict and tip short, friendly and specific.`;
