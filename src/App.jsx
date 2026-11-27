@@ -44,7 +44,8 @@ export default function Root() {
 function App() {
   const onboarded = useStore((s) => s.onboarded);
   const pendingDone = useStore((s) => s.pendingDone);
-  const [tab, setTab] = useState('home');
+  // #tab=food etc. opens a tab directly (used for store screenshots and links)
+  const [tab, setTab] = useState(() => (location.hash.match(/tab=(\w+)/) || [])[1] || 'home');
   const [prev, setPrev] = useState('home');
   const [scan, setScan] = useState(null); // null | {slot}
   const [moveStart, setMoveStart] = useState(null);
