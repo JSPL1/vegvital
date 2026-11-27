@@ -49,7 +49,15 @@ export async function saveSetting(key, value) {
 // "Validated" mark: saved when a test with this exact key passes; it no longer matches once the key changes.
 import crypto from 'node:crypto';
 const fp = (v) => crypto.createHash('sha256').update(String(v)).digest('hex').slice(0, 16);
-export const KEY_OF = { gemini: 'GEMINI_API_KEY', groq: 'GROQ_API_KEY', claude: 'ANTHROPIC_API_KEY' };
+export const KEY_OF = { gemini: 'GEMINI_API_KEY', groq: 'GROQ_API_KEY', claude: 'ANTHROPIC_API_KEY', caloriemama: 'CALORIEMAMA_API_KEY' };
+export const MODEL_OF = { gemini: 'GEMINI_MODEL', groq: 'GROQ_MODEL', claude: 'CLAUDE_MODEL' };
+// Simple settings have no test of their own: the server checks their format when saved, and that locks them.
+export const CHECKED_ON_SAVE = ['SCANS_PER_DAY', 'ALLOW_SIGNUP', 'OFF_ENABLED'];
+/** A test for this AI passed: lock its key and, if one is set, its model. */
+export async function markProvider(p, how) {
+  if (KEY_OF[p]) await markValidated(KEY_OF[p], how);
+  if (MODEL_OF[p] && setting(MODEL_OF[p])) await markValidated(MODEL_OF[p], how);
+}
 export async function markValidated(key, how) {
   const v = setting(key); if (!v) return;
   await q(`INSERT INTO app_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`, ['VALID:' + key, JSON.stringify({ fp: fp(v), at: new Date().toISOString(), how })]);

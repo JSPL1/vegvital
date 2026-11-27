@@ -53,6 +53,8 @@
   .modal.max .body img { max-width:none; max-height:none; margin:auto; }
   .set-row { display:grid; grid-template-columns:260px 1fr auto; gap:10px; align-items:center; padding:10px 0; border-bottom:1px solid var(--line); }
   .ok { color:var(--accent); } .bad { color:var(--bad); }
+  input.locked { border-color:#1f6b5a; background:#0b1a17; color:#9ff5d6; cursor:not-allowed; }
+  input.locked::placeholder { color:#9ff5d6; opacity:.9; }
   pre.res { background:#0f1528; border:1px solid var(--line); border-radius:8px; padding:10px; white-space:pre-wrap; font-size:12px; max-height:320px; overflow:auto; }
   @media (max-width:700px) { .set-row { grid-template-columns:1fr; } }
   .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
@@ -260,7 +262,7 @@ async function showSettings() {
   shell(`<div class="card"><h2 style="margin-top:0">⚙️ API settings</h2>
       <p class="muted small" style="margin-top:0">Values saved here (in the database) are used instead of the server settings on Hostinger. Save an empty box to go back to the Hostinger value. Keys are never shown in full.</p>
       ${s.editable.map((e) => `<div class="set-row"><div><b>${esc(e.label)}</b><div class="muted small">${esc(e.hint || '')}</div><div class="small">${e.set ? '<span class="ok">● set</span>' : '<span class="bad">● not set</span>'} <span class="muted">· from ${esc(e.source)}</span>${e.secret && e.value ? ' · <code>' + esc(e.value) + '</code>' : ''}</div></div>
-        ${e.validated ? `<input data-key="${e.key}" type="password" disabled placeholder="✅ Validated by ${esc(e.validated.how)} · ${esc(fmtDate(e.validated.at))} — locked" autocomplete="off">
+        ${e.validated ? `<input data-key="${e.key}" type="${e.secret ? 'password' : 'text'}" disabled ${e.secret ? '' : `value="${esc(e.value)}" title="Validated — locked"`} placeholder="✅ Validated by ${esc(e.validated.how)} · ${esc(fmtDate(e.validated.at))} — locked" autocomplete="off" class="locked">
         <div class="row"><button data-edit="${e.key}">✏️ Edit</button></div></div>` : `<input data-key="${e.key}" type="${e.secret ? 'password' : 'text'}" placeholder="${e.secret ? 'Paste a new key to replace' : 'not set'}" value="${e.secret ? '' : esc(e.set ? e.value : '')}" autocomplete="off">
         <div class="row"><button class="primary" data-save="${e.key}">Save</button>${e.secret ? `<button data-clear="${e.key}">Clear</button>` : ''}</div></div>`}`).join('')}
     </div>
@@ -276,8 +278,9 @@ async function showSettings() {
   const out = (x) => { $('#res').textContent = typeof x === 'string' ? x : JSON.stringify(x, null, 2); };
   document.querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => {
     const k = b.dataset.edit, inp = $(`[data-key="${k}"]`);
-    inp.disabled = false; inp.placeholder = 'Paste the new key'; inp.focus();
-    b.parentElement.innerHTML = `<button class="primary" data-save="${k}">Save</button><button data-clear="${k}">Clear</button><button data-cancel>Cancel</button>`;
+    const sec = s.editable.find((e) => e.key === k)?.secret;
+    inp.disabled = false; inp.classList.remove('locked'); inp.placeholder = sec ? 'Paste the new key' : 'New value (empty = back to default)'; inp.focus(); if (!sec) inp.select();
+    b.parentElement.innerHTML = `<button class="primary" data-save="${k}">Save</button>${sec ? `<button data-clear="${k}">Clear</button>` : ''}<button data-cancel>Cancel</button>`;
     wireSave(); $('[data-cancel]').onclick = () => showSettings();
   });
   const wireSave = () => document.querySelectorAll('[data-save]').forEach((b) => b.onclick = async () => {
