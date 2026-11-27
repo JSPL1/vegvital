@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { q, migrate } from './db.js';
 import { hashPassword, checkPassword, makeToken, requireUser, requireAdmin, tooMany, ensureAdmin } from './auth.js';
 import { analyzePhoto, aiConfigured, testProvider } from './ai.js';
-import { loadSettings, setting, saveSetting, EDITABLE, source, mask } from './settings.js';
+import { loadSettings, setting, saveSetting, EDITABLE, source, mask, markValidated, validated, KEY_OF } from './settings.js';
 import * as off from './off.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -224,7 +224,7 @@ app.delete('/api/admin/users/:id', requireUser, requireAdmin, wrap(async (req, r
 app.get('/api/admin/settings', requireUser, requireAdmin, wrap(async (req, res) => {
   await loadSettings(true);
   res.json({
-    editable: Object.entries(EDITABLE).map(([k, d]) => ({ key: k, ...d, value: d.secret ? mask(setting(k)) : setting(k), set: !!setting(k), source: source(k) })),
+    editable: Object.entries(EDITABLE).map(([k, d]) => ({ key: k, ...d, value: d.secret ? mask(setting(k)) : setting(k), set: !!setting(k), source: source(k), validated: d.secret ? validated(k) : null })),
     fixed: [
       { key: 'DATABASE_URL', label: 'Neon database', set: !!process.env.DATABASE_URL, note: 'Change only on Hostinger → Environment variables' },
       { key: 'JWT_SECRET', label: 'Login secret', set: !!process.env.JWT_SECRET, note: 'Change only on Hostinger; changing it logs everyone out' },
@@ -249,8 +249,10 @@ app.post('/api/admin/test', requireUser, requireAdmin, wrap(async (req, res) => 
   try {
     if (target === 'database') { await q('SELECT 1'); const n = (await q('SELECT count(*)::int AS n FROM users'))[0].n; return res.json({ ok: true, ms: Date.now() - t0, info: n + ' users' }); }
     if (target === 'off') { const item = await off.byBarcode(code || '3017620422003'); return res.json({ ok: !!item, ms: Date.now() - t0, item }); }
-    if (target === 'scan') { const r = await analyzePhoto({ base64, small, mealLabel: 'meal', remainingKcal: 800 }); return res.json({ ok: true, ms: Date.now() - t0, result: r }); }
-    res.json(await testProvider(target, base64, small));
+    if (target === 'scan') { const r = await analyzePhoto({ base64, small, mealLabel: 'meal', remainingKcal: 800 }); if (KEY_OF[r.provider]) await markValidated(KEY_OF[r.provider], 'photo test'); return res.json({ ok: true, ms: Date.now() - t0, result: r }); }
+    const r = await testProvider(target, base64, small);
+    if (r.ok && KEY_OF[target]) await markValidated(KEY_OF[target], base64 ? 'photo test' : 'key test');
+    res.json(r);
   } catch (e) {
     res.json({ ok: false, ms: Date.now() - t0, error: e.message, details: e.details });
   }

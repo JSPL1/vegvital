@@ -260,8 +260,9 @@ async function showSettings() {
   shell(`<div class="card"><h2 style="margin-top:0">⚙️ API settings</h2>
       <p class="muted small" style="margin-top:0">Values saved here (in the database) are used instead of the server settings on Hostinger. Save an empty box to go back to the Hostinger value. Keys are never shown in full.</p>
       ${s.editable.map((e) => `<div class="set-row"><div><b>${esc(e.label)}</b><div class="muted small">${esc(e.hint || '')}</div><div class="small">${e.set ? '<span class="ok">● set</span>' : '<span class="bad">● not set</span>'} <span class="muted">· from ${esc(e.source)}</span>${e.secret && e.value ? ' · <code>' + esc(e.value) + '</code>' : ''}</div></div>
-        <input data-key="${e.key}" type="${e.secret ? 'password' : 'text'}" placeholder="${e.secret ? 'Paste a new key to replace' : 'not set'}" value="${e.secret ? '' : esc(e.set ? e.value : '')}" autocomplete="off">
-        <div class="row"><button class="primary" data-save="${e.key}">Save</button>${e.secret ? `<button data-clear="${e.key}">Clear</button>` : ''}</div></div>`).join('')}
+        ${e.validated ? `<input data-key="${e.key}" type="password" disabled placeholder="✅ Validated by ${esc(e.validated.how)} · ${esc(fmtDate(e.validated.at))} — locked" autocomplete="off">
+        <div class="row"><button data-edit="${e.key}">✏️ Edit</button></div></div>` : `<input data-key="${e.key}" type="${e.secret ? 'password' : 'text'}" placeholder="${e.secret ? 'Paste a new key to replace' : 'not set'}" value="${e.secret ? '' : esc(e.set ? e.value : '')}" autocomplete="off">
+        <div class="row"><button class="primary" data-save="${e.key}">Save</button>${e.secret ? `<button data-clear="${e.key}">Clear</button>` : ''}</div></div>`}`).join('')}
     </div>
     <div class="card"><h3 style="margin-top:0">✅ Check everything works</h3>
       <div class="row">${testBtn('database', 'Database (Neon)')}${testBtn('gemini', 'Gemini key')}${testBtn('groq', 'Groq key')}${testBtn('claude', 'Claude key')}${testBtn('off', 'Open Food Facts')}</div>
@@ -273,16 +274,22 @@ async function showSettings() {
     <div class="card"><h3 style="margin-top:0">🧾 Last failed photo readings</h3>${s.lastAiErrors.length ? s.lastAiErrors.map((e) => `<div class="small" style="margin-bottom:8px"><b>${esc(fmtDate(e.at))}</b> · ${esc(e.user)}<br>${e.details.map(esc).join('<br>')}</div>`).join('') : '<p class="muted small">None since the server last started.</p>'}</div>`, true);
   $('#back').textContent = '← Users';
   const out = (x) => { $('#res').textContent = typeof x === 'string' ? x : JSON.stringify(x, null, 2); };
-  document.querySelectorAll('[data-save]').forEach((b) => b.onclick = async () => {
+  document.querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => {
+    const k = b.dataset.edit, inp = $(`[data-key="${k}"]`);
+    inp.disabled = false; inp.placeholder = 'Paste the new key'; inp.focus();
+    b.parentElement.innerHTML = `<button class="primary" data-save="${k}">Save</button><button data-clear="${k}">Clear</button><button data-cancel>Cancel</button>`;
+    wireSave(); $('[data-cancel]').onclick = () => showSettings();
+  });
+  const wireSave = () => document.querySelectorAll('[data-save]').forEach((b) => b.onclick = async () => {
     const k = b.dataset.save, v = $(`[data-key="${k}"]`).value;
     const sec = s.editable.find((e) => e.key === k)?.secret;
     if (sec && !v.trim()) return alert('Paste the new key first (use Clear to remove it).');
     try { await api('/api/admin/settings', { method: 'PUT', body: { key: k, value: v } }); showSettings(); } catch (x) { alert(x.message); }
-  });
-  document.querySelectorAll('[data-clear]').forEach((b) => b.onclick = async () => {
+  }) || document.querySelectorAll('[data-clear]').forEach((b) => b.onclick = async () => {
     if (!confirm('Remove the key saved here? The Hostinger value (if any) is used instead.')) return;
     try { await api('/api/admin/settings', { method: 'PUT', body: { key: b.dataset.clear, value: '' } }); showSettings(); } catch (x) { alert(x.message); }
   });
+  wireSave();
   const photoB64 = () => new Promise((res, rej) => {
     const f = $('#tphoto').files[0]; if (!f) return rej(new Error('Pick a food photo first.'));
     const img = new Image();

@@ -46,4 +46,17 @@ export async function saveSetting(key, value) {
   await loadSettings(true);
 }
 
+// "Validated" mark: saved when a test with this exact key passes; it no longer matches once the key changes.
+import crypto from 'node:crypto';
+const fp = (v) => crypto.createHash('sha256').update(String(v)).digest('hex').slice(0, 16);
+export const KEY_OF = { gemini: 'GEMINI_API_KEY', groq: 'GROQ_API_KEY', claude: 'ANTHROPIC_API_KEY' };
+export async function markValidated(key, how) {
+  const v = setting(key); if (!v) return;
+  await q(`INSERT INTO app_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`, ['VALID:' + key, JSON.stringify({ fp: fp(v), at: new Date().toISOString(), how })]);
+  await loadSettings(true);
+}
+export function validated(key) {
+  try { const m = JSON.parse(cache['VALID:' + key] || 'null'); return m && setting(key) && m.fp === fp(setting(key)) ? m : null; } catch { return null; }
+}
+
 export const mask = (v) => (!v ? '' : v.length <= 8 ? '••••' : `${v.slice(0, 4)}••••${v.slice(-4)}`);
