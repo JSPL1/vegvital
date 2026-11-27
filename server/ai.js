@@ -1,14 +1,18 @@
 // Food-photo AI, run on the server so no key ever reaches a phone.
 // Order: Google Gemini (free) → Groq (free backup) → Anthropic Claude (paid, only if a key is set).
-// Keys come from the server settings: GEMINI_API_KEY, GROQ_API_KEY, ANTHROPIC_API_KEY.
+// Keys come from the admin page (Neon) or the host's environment: GEMINI_API_KEY, GROQ_API_KEY, ANTHROPIC_API_KEY.
 import Anthropic from '@anthropic-ai/sdk';
 import { DISALLOWED_WORDS } from '../src/data/foods.js';
+import { setting } from './settings.js';
 
-const GEMINI_KEY = process.env.GEMINI_API_KEY || '';
-const GROQ_KEY = process.env.GROQ_API_KEY || '';
-const CLAUDE_KEY = process.env.ANTHROPIC_API_KEY || '';
+const key = { gemini: () => setting('GEMINI_API_KEY'), groq: () => setting('GROQ_API_KEY'), claude: () => setting('ANTHROPIC_API_KEY') };
+let lastKeys = '';
+function resetIfKeysChanged() {
+  const k = key.gemini() + '|' + key.groq() + '|' + setting('GEMINI_MODEL') + '|' + setting('GROQ_MODEL');
+  if (k !== lastKeys) { lastKeys = k; geminiModels = null; geminiGood = null; groqModels = null; groqGood = null; }
+}
 
-export const aiConfigured = () => !!(GEMINI_KEY || GROQ_KEY || CLAUDE_KEY);
+export const aiConfigured = () => !!(key.gemini() || key.groq() || key.claude());
 
 const SYSTEM = `You are a nutrition analyst inside a personal Indian vegetarian health-tracking app.
 The user is strictly vegetarian (no meat, fish or eggs), does not smoke and does not drink alcohol.
@@ -52,13 +56,15 @@ const parseJson = (text) => {
 
 // ---------- Google Gemini ----------
 const GEMINI = 'https://generativelanguage.googleapis.com/v1beta';
-let geminiModels = null, geminiModelsAt = 0, geminiGood = null;
+var geminiModels = null, geminiModelsAt = 0, geminiGood = null;
 
 async function listGeminiModels() {
+  const forced = setting('GEMINI_MODEL');
+  if (forced) return [forced.startsWith('models/') ? forced : 'models/' + forced];
   if (geminiModels && Date.now() - geminiModelsAt < 6 * 3600e3) return geminiModels;
   const FALLBACK = ['models/gemini-2.5-flash', 'models/gemini-2.5-flash-lite', 'models/gemini-2.0-flash', 'models/gemini-flash-latest'];
   let r;
-  try { r = await fetch(`${GEMINI}/models?pageSize=200`, { headers: { 'x-goog-api-key': GEMINI_KEY } }); } catch { return FALLBACK; }
+  try { r = await fetch(`${GEMINI}/models?pageSize=200`, { headers: { 'x-goog-api-key': key.gemini() } }); } catch { return FALLBACK; }
   if (!r.ok) return FALLBACK;
   const { models = [] } = await r.json();
   const ok = models.filter((m) => (m.supportedGenerationMethods || []).includes('generateContent')
@@ -86,7 +92,7 @@ async function analyzeGemini({ base64, mediaType, mealLabel, remainingKcal }) {
   const deadline = Date.now() + 15000;
   for (const model of order) {
     for (let attempt = 0; attempt < 2 && Date.now() < deadline; attempt++) {
-      const r = await fetch(`${GEMINI}/${model}:generateContent`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GEMINI_KEY }, body });
+      const r = await fetch(`${GEMINI}/${model}:generateContent`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key.gemini() }, body });
       if (r.ok) {
         const j = await r.json();
         const data = parseJson((j.candidates?.[0]?.content?.parts || []).map((p) => p.text || '').join(''));
@@ -110,12 +116,13 @@ async function analyzeGemini({ base64, mediaType, mealLabel, remainingKcal }) {
 // ---------- Groq ----------
 const GROQ = 'https://api.groq.com/openai/v1';
 const GROQ_DEFAULTS = ['meta-llama/llama-4-scout-17b-16e-instruct', 'meta-llama/llama-4-maverick-17b-128e-instruct'];
-let groqModels = null, groqGood = null;
+var groqModels = null, groqGood = null;
 
 async function listGroqModels() {
+  if (setting('GROQ_MODEL')) return [setting('GROQ_MODEL')];
   if (groqModels) return groqModels;
   try {
-    const r = await fetch(GROQ + '/models', { headers: { Authorization: 'Bearer ' + GROQ_KEY } });
+    const r = await fetch(GROQ + '/models', { headers: { Authorization: 'Bearer ' + key.groq() } });
     if (r.ok) {
       const ids = ((await r.json()).data || []).filter((m) => m.active !== false).map((m) => m.id);
       const vis = ids.filter((id) => /llama-4|vision|-vl|vl-|scout|maverick/i.test(id) && !/guard|whisper|tts/i.test(id));
@@ -137,7 +144,7 @@ async function analyzeGroq({ base64, mediaType, mealLabel, remainingKcal }) {
     for (let attempt = 0; attempt < 2 && Date.now() < deadline; attempt++) {
       const r = await fetch(GROQ + '/chat/completions', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + GROQ_KEY },
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + key.groq() },
         body: JSON.stringify({
           model, temperature: 0.2, max_completion_tokens: 1500, response_format: { type: 'json_object' },
           messages: [
@@ -166,9 +173,9 @@ async function analyzeGroq({ base64, mediaType, mealLabel, remainingKcal }) {
 
 // ---------- Anthropic Claude (optional, paid) ----------
 async function analyzeClaude({ base64, mediaType, mealLabel, remainingKcal }) {
-  const anthropic = new Anthropic({ apiKey: CLAUDE_KEY });
+  const anthropic = new Anthropic({ apiKey: key.claude() });
   const r = await anthropic.messages.create({
-    model: process.env.CLAUDE_MODEL || 'claude-haiku-5-5',
+    model: setting('CLAUDE_MODEL', 'claude-haiku-5-5'),
     max_tokens: 2000,
     system: SYSTEM + '\n\n' + JSON_SHAPE,
     messages: [{ role: 'user', content: [
@@ -181,15 +188,46 @@ async function analyzeClaude({ base64, mediaType, mealLabel, remainingKcal }) {
   return normalise(data);
 }
 
-/** Returns the analysis, or throws an error with .busy = true when every AI is busy right now. */
+const RUN = { gemini: analyzeGemini, groq: analyzeGroq, claude: analyzeClaude };
+const order = () => setting('AI_ORDER', 'gemini,groq,claude').split(',').map((x) => x.trim().toLowerCase()).filter((x) => RUN[x]);
+
+/** Returns the analysis, or throws an error with .busy = true and .details (one line per AI) when every AI failed. */
 export async function analyzePhoto(args) {
+  resetIfKeysChanged();
   const a = { mediaType: 'image/jpeg', ...args };
   const errs = [];
-  if (GEMINI_KEY) { try { return await analyzeGemini(a); } catch (e) { errs.push(e.message); } }
-  if (GROQ_KEY) { try { return await analyzeGroq(a); } catch (e) { errs.push(e.message); } }
-  if (CLAUDE_KEY) { try { return await analyzeClaude(a); } catch (e) { errs.push(e.message); } }
-  console.warn('[ai] all providers failed:', errs.join(' · '));
+  for (const p of order()) {
+    if (!key[p]()) continue;
+    try { const r = await RUN[p](a); r.provider = p; return r; } catch (e) { errs.push(`${p}: ${e.message}`); }
+  }
+  console.warn('[ai] all providers failed:', errs.join(' · ') || 'no keys set');
   const err = new Error(errs.length ? 'The food AI is busy right now. Your photo is saved and will be read automatically soon.' : 'Photo reading is not set up on the server yet.');
-  err.busy = true;
+  err.busy = true; err.details = errs;
   throw err;
+}
+
+/** Admin "Test" button: checks one AI with a real request. Optional base64 photo, else a text-only ping. */
+export async function testProvider(p, base64) {
+  resetIfKeysChanged();
+  if (!RUN[p]) throw new Error('Unknown AI');
+  if (!key[p]()) throw new Error('No key saved');
+  const t0 = Date.now();
+  if (base64) { const r = await RUN[p]({ base64, mediaType: 'image/jpeg', mealLabel: 'meal', remainingKcal: 800 }); return { ok: true, ms: Date.now() - t0, result: r }; }
+  if (p === 'gemini') {
+    const models = await listGeminiModels();
+    const r = await fetch(`${GEMINI}/${models[0]}:generateContent`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key.gemini() }, body: JSON.stringify({ contents: [{ parts: [{ text: 'Reply with the single word ok' }] }] }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(`Gemini ${r.status}: ${j?.error?.message || 'error'}`.slice(0, 300));
+    return { ok: true, ms: Date.now() - t0, model: models[0].replace('models/', '') };
+  }
+  if (p === 'groq') {
+    const r = await fetch(GROQ + '/models', { headers: { Authorization: 'Bearer ' + key.groq() } });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(`Groq ${r.status}: ${j?.error?.message || 'error'}`.slice(0, 300));
+    groqModels = null;
+    return { ok: true, ms: Date.now() - t0, model: (await listGroqModels())[0] };
+  }
+  const anthropic = new Anthropic({ apiKey: key.claude() });
+  await anthropic.messages.create({ model: setting('CLAUDE_MODEL', 'claude-haiku-5-5'), max_tokens: 16, messages: [{ role: 'user', content: 'Reply with ok' }] });
+  return { ok: true, ms: Date.now() - t0, model: setting('CLAUDE_MODEL', 'claude-haiku-5-5') };
 }

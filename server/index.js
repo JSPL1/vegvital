@@ -10,11 +10,12 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { q, migrate } from './db.js';
 import { hashPassword, checkPassword, makeToken, requireUser, requireAdmin, tooMany, ensureAdmin } from './auth.js';
-import { analyzePhoto, aiConfigured } from './ai.js';
+import { analyzePhoto, aiConfigured, testProvider } from './ai.js';
+import { loadSettings, setting, saveSetting, EDITABLE, source, mask } from './settings.js';
+import * as off from './off.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = process.env.PORT || 3000;
-const SCANS_PER_DAY = +(process.env.SCANS_PER_DAY || 80);
 
 const app = express();
 app.disable('x-powered-by');
@@ -31,6 +32,8 @@ app.use('/api', (req, res, next) => {
   next();
 });
 app.use('/api', express.json({ limit: '25mb' }));
+app.use('/api', (req, res, next) => { loadSettings().then(() => next(), () => next()); });
+const lastAiErrors = []; // shown to the admin
 
 // Never let a database address (it holds the password) reach the logs.
 const safe = (e) => String(e?.message || e).replace(/postgres(ql)?:\/\/\S+/gi, 'postgresql://[hidden]');
@@ -50,7 +53,7 @@ app.post('/api/auth/register', wrap(async (req, res) => {
   if (tooMany('r:' + req.ip)) return res.status(429).json({ error: 'Too many tries. Wait 10 minutes.' });
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return res.status(400).json({ error: 'Enter a valid email address.' });
   if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters.' });
-  if (process.env.ALLOW_SIGNUP === 'false') return res.status(403).json({ error: 'New sign-ups are closed. Ask the admin for an account.' });
+  if (setting('ALLOW_SIGNUP', 'true') === 'false') return res.status(403).json({ error: 'New sign-ups are closed. Ask the admin for an account.' });
   const exists = await q('SELECT 1 FROM users WHERE email = $1', [email]);
   if (exists[0]) return res.status(409).json({ error: 'An account with this email already exists. Log in instead.' });
   const u = (await q('INSERT INTO users (email, name, pass_hash) VALUES ($1, $2, $3) RETURNING id, email, name, role', [email, name, hashPassword(password)]))[0];
@@ -155,15 +158,29 @@ app.post('/api/scan', requireUser, wrap(async (req, res) => {
   const { base64, mediaType, mealLabel, remainingKcal } = req.body;
   if (!base64 || base64.length < 100) return res.status(400).json({ error: 'No photo' });
   const n = (await q("SELECT count(*)::int AS n FROM scan_log WHERE user_id = $1 AND at > now() - interval '1 day'", [req.user.id]))[0].n;
-  if (n >= SCANS_PER_DAY) return res.status(429).json({ error: 'Daily photo-reading limit reached. Use quick-pick for now.', busy: true });
+  if (n >= +setting('SCANS_PER_DAY', '80')) return res.status(429).json({ error: 'Daily photo-reading limit reached. Use quick-pick for now.', busy: true });
   try {
     const result = await analyzePhoto({ base64, mediaType: mediaType || 'image/jpeg', mealLabel, remainingKcal });
     q('INSERT INTO scan_log (user_id, ok) VALUES ($1, true)', [req.user.id]).catch(() => {});
     res.json(result);
   } catch (e) {
     q('INSERT INTO scan_log (user_id, ok) VALUES ($1, false)', [req.user.id]).catch(() => {});
+    lastAiErrors.unshift({ at: new Date().toISOString(), user: req.user.email, details: e.details || [e.message] });
+    lastAiErrors.length = Math.min(lastAiErrors.length, 20);
     res.status(503).json({ error: e.message, busy: true });
   }
+}));
+
+// ---------- Open Food Facts (packaged foods) ----------
+const offOn = () => setting('OFF_ENABLED', 'true') !== 'false';
+app.get('/api/food/barcode/:code', requireUser, wrap(async (req, res) => {
+  if (!offOn()) return res.status(503).json({ error: 'Packaged-food lookup is turned off.' });
+  const item = await off.byBarcode(req.params.code);
+  res.json(item ? { item } : { item: null, error: 'This product is not in Open Food Facts yet.' });
+}));
+app.get('/api/food/search', requireUser, wrap(async (req, res) => {
+  if (!offOn()) return res.json({ items: [] });
+  res.json({ items: await off.search(req.query.q) });
 }));
 
 // ---------- admin ----------
@@ -203,6 +220,42 @@ app.delete('/api/admin/users/:id', requireUser, requireAdmin, wrap(async (req, r
   res.json({ ok: true });
 }));
 
+// ---------- admin: settings & tests ----------
+app.get('/api/admin/settings', requireUser, requireAdmin, wrap(async (req, res) => {
+  await loadSettings(true);
+  res.json({
+    editable: Object.entries(EDITABLE).map(([k, d]) => ({ key: k, ...d, value: d.secret ? mask(setting(k)) : setting(k), set: !!setting(k), source: source(k) })),
+    fixed: [
+      { key: 'DATABASE_URL', label: 'Neon database', set: !!process.env.DATABASE_URL, note: 'Change only on Hostinger → Environment variables' },
+      { key: 'JWT_SECRET', label: 'Login secret', set: !!process.env.JWT_SECRET, note: 'Change only on Hostinger; changing it logs everyone out' },
+      { key: 'ADMIN_EMAIL', label: 'Admin email', set: !!process.env.ADMIN_EMAIL, note: process.env.ADMIN_EMAIL || '' },
+    ],
+    lastAiErrors,
+  });
+}));
+
+app.put('/api/admin/settings', requireUser, requireAdmin, wrap(async (req, res) => {
+  const { key, value } = req.body;
+  if (key === 'ALLOW_SIGNUP' || key === 'OFF_ENABLED') { if (value && !['true', 'false'].includes(String(value).trim())) return res.status(400).json({ error: 'Use true or false.' }); }
+  if (key === 'SCANS_PER_DAY' && value && !(+value > 0)) return res.status(400).json({ error: 'Use a number above 0.' });
+  if (key === 'AI_ORDER' && value && !String(value).split(',').every((x) => ['gemini', 'groq', 'claude'].includes(x.trim().toLowerCase()))) return res.status(400).json({ error: 'Use only gemini, groq, claude separated by commas.' });
+  await saveSetting(key, value);
+  res.json({ ok: true });
+}));
+
+app.post('/api/admin/test', requireUser, requireAdmin, wrap(async (req, res) => {
+  const { target, base64, code } = req.body;
+  const t0 = Date.now();
+  try {
+    if (target === 'database') { await q('SELECT 1'); const n = (await q('SELECT count(*)::int AS n FROM users'))[0].n; return res.json({ ok: true, ms: Date.now() - t0, info: n + ' users' }); }
+    if (target === 'off') { const item = await off.byBarcode(code || '3017620422003'); return res.json({ ok: !!item, ms: Date.now() - t0, item }); }
+    if (target === 'scan') { const r = await analyzePhoto({ base64, mealLabel: 'meal', remainingKcal: 800 }); return res.json({ ok: true, ms: Date.now() - t0, result: r }); }
+    res.json(await testProvider(target, base64));
+  } catch (e) {
+    res.json({ ok: false, ms: Date.now() - t0, error: e.message, details: e.details });
+  }
+}));
+
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
 app.use('/api', (err, req, res, _next) => {
   console.error('[api]', req.method, req.path, safe(err));
@@ -224,4 +277,4 @@ if (!fs.existsSync(path.join(ROOT, 'dist', 'index.html'))) {
 }
 
 app.listen(PORT, () => console.log(`VegVital server on :${PORT}`));
-migrate().then(ensureAdmin).then(() => console.log('[db] ready')).catch((e) => console.error('[db] setup failed:', safe(e)));
+migrate().then(() => loadSettings(true)).then(ensureAdmin).then(() => console.log('[db] ready')).catch((e) => console.error('[db] setup failed:', safe(e)));

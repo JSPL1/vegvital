@@ -159,6 +159,7 @@ export default function Settings({ back, toast }) {
         <Button variant="danger" onClick={() => { if (confirm("Delete all logged days? Profile is kept.")) { setState({ days: {}, weights: [] }); toast("Cleared"); } }}>Clear history</Button>
       </Card>
       <div className="tiny muted center-text">VegVital 1.0 · made for you 💚</div>
+      <div className="tiny muted center-text" style={{ marginTop: 4 }}>Packaged-food data © <a href="https://world.openfoodfacts.org" target="_blank" rel="noreferrer">Open Food Facts</a> contributors, ODbL</div>
       <div style={{ height: 110 }} />
     </motion.div>
   );

@@ -33,10 +33,28 @@
   .bar { height:6px; border-radius:3px; background:#243050; overflow:hidden; margin-top:4px; }
   .bar i { display:block; height:100%; background:var(--accent); }
   .bar i.over { background:var(--warn); }
-  .photos { display:grid; grid-template-columns:repeat(auto-fill,minmax(130px,1fr)); gap:10px; }
-  .ph { background:#0f1528; border:1px solid var(--line); border-radius:10px; overflow:hidden; cursor:pointer; }
-  .ph .img { aspect-ratio:1; background:#1a2238 center/cover no-repeat; display:flex; align-items:center; justify-content:center; color:var(--muted); font-size:12px; }
-  .ph div.t { padding:6px 8px; font-size:12px; }
+  .pday { margin-bottom:14px; }
+  .pday h4 { margin:0 0 8px; font-size:13px; color:var(--muted); font-weight:600; }
+  .pday h4 b { color:var(--text); }
+  .photos { display:flex; flex-wrap:wrap; gap:8px; }
+  .ph { width:92px; background:#0f1528; border:1px solid var(--line); border-radius:10px; overflow:hidden; cursor:zoom-in; position:relative; }
+  .ph:hover { border-color:var(--accent); }
+  .ph .img { width:92px; height:92px; background:#1a2238 center/cover no-repeat; display:flex; align-items:center; justify-content:center; color:var(--muted); font-size:11px; }
+  .ph .slot { position:absolute; top:4px; left:4px; background:rgba(7,11,20,.82); border-radius:99px; padding:1px 7px 1px 5px; font-size:11px; white-space:nowrap; max-width:80px; overflow:hidden; text-overflow:ellipsis; }
+  .ph div.t { padding:4px 6px; font-size:11px; line-height:1.25; }
+  .ph div.t b { display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .modal { position:fixed; inset:0; background:rgba(0,0,0,.8); display:flex; align-items:center; justify-content:center; z-index:9; }
+  .modal .win { background:var(--card); border:1px solid var(--line); border-radius:14px; max-width:min(720px,94vw); max-height:92vh; display:flex; flex-direction:column; overflow:hidden; }
+  .modal .bar { display:flex; gap:8px; align-items:center; padding:10px 12px; border-bottom:1px solid var(--line); }
+  .modal .body { overflow:auto; display:flex; align-items:center; justify-content:center; background:#05070d; min-height:200px; }
+  .modal .body img { max-width:min(720px,94vw); max-height:72vh; display:block; }
+  .modal.max .win { max-width:100vw; max-height:100vh; width:100vw; height:100vh; border-radius:0; }
+  .modal.max .body { flex:1; align-items:flex-start; justify-content:flex-start; }
+  .modal.max .body img { max-width:none; max-height:none; margin:auto; }
+  .set-row { display:grid; grid-template-columns:260px 1fr auto; gap:10px; align-items:center; padding:10px 0; border-bottom:1px solid var(--line); }
+  .ok { color:var(--accent); } .bad { color:var(--bad); }
+  pre.res { background:#0f1528; border:1px solid var(--line); border-radius:8px; padding:10px; white-space:pre-wrap; font-size:12px; max-height:320px; overflow:auto; }
+  @media (max-width:700px) { .set-row { grid-template-columns:1fr; } }
   .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
   .grow { flex:1; }
   .big { position:fixed; inset:0; background:rgba(0,0,0,.85); display:flex; align-items:center; justify-content:center; z-index:9; cursor:zoom-out; }
@@ -80,7 +98,8 @@ function showLogin(msg = '') {
 
 function shell(inner, back) {
   $('#app').innerHTML = `<header>${back ? '<button id="back">← All users</button>' : ''}<h1>🌱 VegVital Admin</h1>
-    <button id="out">Log out</button></header><main>${inner}</main>`;
+    <button id="set">⚙️ API settings</button><button id="out">Log out</button></header><main>${inner}</main>`;
+  $('#set').onclick = () => { location.hash = 'settings'; };
   $('#out').onclick = () => { token = ''; localStorage.removeItem('vv-admin-token'); showLogin(); };
   if (back) $('#back').onclick = () => { location.hash = ''; };
 }
@@ -166,8 +185,7 @@ async function showUser(id) {
     <div class="card"><h3 style="margin-top:0">Daily report (last 60 days)</h3>
       ${rows ? `<div style="overflow-x:auto"><table class="meals"><thead><tr><th>Date</th><th>Calories</th><th class="hide-sm">Macros (g)</th><th>Water</th><th>Steps</th><th class="hide-sm">Sleep</th><th class="hide-sm">Workouts</th><th class="hide-sm">Logged</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="muted">No days logged yet.</p>'}</div>
     <div class="card"><h3 style="margin-top:0">Meals by day</h3><div class="row" style="margin-bottom:10px"><select id="day">${keys.map((k) => `<option>${esc(k)}</option>`).join('')}</select></div><div id="mealbox"></div></div>
-    <div class="card"><h3 style="margin-top:0">Food photos</h3><div class="photos" id="photos">${d.photos.map((ph) => `
-      <div class="ph" data-id="${esc(ph.id)}"><div class="img">loading…</div><div class="t"><b>${esc(ph.name || ph.slot || 'Food')}</b><div class="muted">${esc(ph.day)}${ph.kcal ? ' · ' + ph.kcal + ' kcal' : ''}</div></div></div>`).join('') || '<p class="muted">No photos.</p>'}</div></div>`, true);
+    <div class="card"><h3 style="margin-top:0">Food photos <span class="muted small">by date · tap a photo to open</span></h3>${photoDays(d.photos)}</div>`, true);
 
   const drawMeals = () => {
     const day = s.days?.[$('#day')?.value];
@@ -184,10 +202,7 @@ async function showUser(id) {
   const io = new IntersectionObserver((ents) => ents.forEach((e) => { if (e.isIntersecting) { io.unobserve(e.target); loadThumb($('.img', e.target), e.target.dataset.id); } }));
   document.querySelectorAll('.ph').forEach((el) => {
     io.observe(el);
-    el.onclick = async () => {
-      const box = document.createElement('div'); box.className = 'big'; box.textContent = 'Loading…'; box.onclick = () => box.remove(); document.body.appendChild(box);
-      try { const r = await api('/api/photos/' + encodeURIComponent(el.dataset.id) + '/image'); box.innerHTML = r.image ? `<img src="data:image/jpeg;base64,${r.image}">` : 'No picture'; } catch (x) { box.textContent = x.message; }
-    };
+    el.onclick = () => openPhoto(d.photos.find((p) => p.id === el.dataset.id));
   });
   $('#pw').onclick = async () => {
     const pw = prompt('New password for ' + u.email + ' (6+ characters):'); if (!pw) return;
@@ -200,11 +215,98 @@ async function showUser(id) {
   };
 }
 
+const SLOTS = { pre: ['🌅', 'Pre-breakfast'], breakfast: ['🍳', 'Breakfast'], msnack: ['🍎', 'Morning snack'], lunch: ['🍱', 'Lunch'], esnack: ['🥨', 'Evening snack'], dinner: ['🍲', 'Dinner'], post: ['🌙', 'Post-dinner'] };
+const slotOf = (k) => SLOTS[k] || ['🍽️', k || 'Meal'];
+const SLOT_ORDER = Object.keys(SLOTS);
+const niceDay = (k) => new Date(k + 'T12:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+
+function photoDays(photos) {
+  if (!photos.length) return '<p class="muted">No photos.</p>';
+  const byDay = {};
+  for (const p of photos) (byDay[p.day] = byDay[p.day] || []).push(p);
+  return Object.keys(byDay).sort().reverse().map((day) => {
+    const list = byDay[day].sort((a, b) => SLOT_ORDER.indexOf(a.slot) - SLOT_ORDER.indexOf(b.slot) || new Date(a.taken_at || a.created_at) - new Date(b.taken_at || b.created_at));
+    const kcal = list.reduce((t, p) => t + (+p.kcal || 0), 0);
+    return `<div class="pday"><h4><b>📅 ${esc(niceDay(day))}</b> · ${list.length} photo${list.length > 1 ? 's' : ''}${kcal ? ' · ' + kcal + ' kcal' : ''}</h4><div class="photos">${list.map((ph) => {
+      const [ic, lb] = slotOf(ph.slot);
+      return `<div class="ph" data-id="${esc(ph.id)}" title="${esc(lb)} · ${esc(ph.name || '')}"><div class="img">loading…</div><span class="slot">${ic} ${esc(lb)}</span><div class="t"><b>${esc(ph.name || 'Food')}</b><span class="muted">${ph.kcal ? ph.kcal + ' kcal' : esc(ph.status || '')}</span></div></div>`;
+    }).join('')}</div></div>`;
+  }).join('');
+}
+
+async function openPhoto(ph) {
+  if (!ph) return;
+  const [ic, lb] = slotOf(ph.slot);
+  const m = document.createElement('div'); m.className = 'modal';
+  m.innerHTML = `<div class="win"><div class="bar"><b class="grow">${ic} ${esc(lb)} · ${esc(niceDay(ph.day))}</b><button class="mx" title="Show at full size">⛶ Maximize</button><button class="cl">✕</button></div>
+    <div class="body">Loading…</div><div class="bar small muted">${esc(ph.name || '')}${ph.kcal ? ' · ' + ph.kcal + ' kcal' : ''}${ph.taken_at ? ' · ' + fmtDate(ph.taken_at) : ''}</div></div>`;
+  document.body.appendChild(m);
+  const key = (e) => { if (e.key === 'Escape') close(); };
+  const close = () => { m.remove(); document.removeEventListener('keydown', key); };
+  document.addEventListener('keydown', key);
+  m.onclick = (e) => { if (e.target === m) close(); };
+  $('.cl', m).onclick = close;
+  $('.mx', m).onclick = () => { const on = m.classList.toggle('max'); $('.mx', m).textContent = on ? '🗗 Restore' : '⛶ Maximize'; };
+  try { const r = await api('/api/photos/' + encodeURIComponent(ph.id) + '/image'); $('.body', m).innerHTML = r.image ? `<img src="data:image/jpeg;base64,${r.image}">` : 'No picture'; }
+  catch (x) { $('.body', m).textContent = x.message; }
+}
+
+// ---------- API settings ----------
+async function showSettings() {
+  shell('<div class="card">Loading…</div>', true);
+  let s;
+  try { s = await api('/api/admin/settings'); } catch { return; }
+  const testBtn = (t, label) => `<button data-test="${t}">${label}</button>`;
+  shell(`<div class="card"><h2 style="margin-top:0">⚙️ API settings</h2>
+      <p class="muted small" style="margin-top:0">Values saved here (in the database) are used instead of the server settings on Hostinger. Save an empty box to go back to the Hostinger value. Keys are never shown in full.</p>
+      ${s.editable.map((e) => `<div class="set-row"><div><b>${esc(e.label)}</b><div class="muted small">${esc(e.hint || '')}</div><div class="small">${e.set ? '<span class="ok">● set</span>' : '<span class="bad">● not set</span>'} <span class="muted">· from ${esc(e.source)}</span>${e.secret && e.value ? ' · <code>' + esc(e.value) + '</code>' : ''}</div></div>
+        <input data-key="${e.key}" type="${e.secret ? 'password' : 'text'}" placeholder="${e.secret ? 'Paste a new key to replace' : 'not set'}" value="${e.secret ? '' : esc(e.set ? e.value : '')}" autocomplete="off">
+        <div class="row"><button class="primary" data-save="${e.key}">Save</button>${e.secret ? `<button data-clear="${e.key}">Clear</button>` : ''}</div></div>`).join('')}
+    </div>
+    <div class="card"><h3 style="margin-top:0">✅ Check everything works</h3>
+      <div class="row">${testBtn('database', 'Database (Neon)')}${testBtn('gemini', 'Gemini key')}${testBtn('groq', 'Groq key')}${testBtn('claude', 'Claude key')}${testBtn('off', 'Open Food Facts')}</div>
+      <p class="small muted">Real photo test: pick a food photo. "Test photo scan" tries each AI in order, exactly like the app.</p>
+      <div class="row"><input type="file" id="tphoto" accept="image/*"><button data-test="scan" class="primary">Test photo scan</button>
+        ${['gemini', 'groq', 'claude'].map((p) => `<button data-photo="${p}">Only ${p}</button>`).join('')}</div>
+      <pre class="res" id="res">Results show here.</pre></div>
+    <div class="card"><h3 style="margin-top:0">🔒 Set on Hostinger only</h3>${s.fixed.map((f) => `<div class="set-row"><b>${esc(f.label)}</b><span>${f.set ? '<span class="ok">● set</span>' : '<span class="bad">● not set</span>'} <span class="muted small">${esc(f.note)}</span></span><span></span></div>`).join('')}</div>
+    <div class="card"><h3 style="margin-top:0">🧾 Last failed photo readings</h3>${s.lastAiErrors.length ? s.lastAiErrors.map((e) => `<div class="small" style="margin-bottom:8px"><b>${esc(fmtDate(e.at))}</b> · ${esc(e.user)}<br>${e.details.map(esc).join('<br>')}</div>`).join('') : '<p class="muted small">None since the server last started.</p>'}</div>`, true);
+  $('#back').textContent = '← Users';
+  const out = (x) => { $('#res').textContent = typeof x === 'string' ? x : JSON.stringify(x, null, 2); };
+  document.querySelectorAll('[data-save]').forEach((b) => b.onclick = async () => {
+    const k = b.dataset.save, v = $(`[data-key="${k}"]`).value;
+    const sec = s.editable.find((e) => e.key === k)?.secret;
+    if (sec && !v.trim()) return alert('Paste the new key first (use Clear to remove it).');
+    try { await api('/api/admin/settings', { method: 'PUT', body: { key: k, value: v } }); showSettings(); } catch (x) { alert(x.message); }
+  });
+  document.querySelectorAll('[data-clear]').forEach((b) => b.onclick = async () => {
+    if (!confirm('Remove the key saved here? The Hostinger value (if any) is used instead.')) return;
+    try { await api('/api/admin/settings', { method: 'PUT', body: { key: b.dataset.clear, value: '' } }); showSettings(); } catch (x) { alert(x.message); }
+  });
+  const photoB64 = () => new Promise((res, rej) => {
+    const f = $('#tphoto').files[0]; if (!f) return rej(new Error('Pick a food photo first.'));
+    const img = new Image();
+    img.onload = () => { const sc = Math.min(1, 1280 / Math.max(img.width, img.height)); const c = document.createElement('canvas'); c.width = img.width * sc; c.height = img.height * sc; c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); res(c.toDataURL('image/jpeg', 0.82).split(',')[1]); };
+    img.onerror = () => rej(new Error('Could not read that image.'));
+    img.src = URL.createObjectURL(f);
+  });
+  const run = async (body) => { out('Testing…'); try { out(await api('/api/admin/test', { method: 'POST', body })); } catch (x) { out('❌ ' + x.message); } };
+  document.querySelectorAll('[data-test]').forEach((b) => b.onclick = async () => {
+    const t = b.dataset.test;
+    if (t === 'scan') { try { await run({ target: 'scan', base64: await photoB64() }); } catch (x) { out('❌ ' + x.message); } return; }
+    if (t === 'off') { const code = prompt('Barcode to look up (empty = a sample product):', ''); if (code === null) return; return run({ target: 'off', code: code || undefined }); }
+    run({ target: t });
+  });
+  document.querySelectorAll('[data-photo]').forEach((b) => b.onclick = async () => { try { await run({ target: b.dataset.photo, base64: await photoB64() }); } catch (x) { out('❌ ' + x.message); } });
+}
+
 function route() {
   if (!token) return showLogin();
+  if (location.hash === '#settings') return showSettings();
   const m = location.hash.match(/^#user\/(\d+)/);
   m ? showUser(m[1]) : listUsers();
 }
+
 window.onhashchange = route;
 route();
 </script>

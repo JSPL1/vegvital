@@ -10,6 +10,7 @@ import { dayTotals, burned } from '../lib/calc.js';
 import { MEAL_SLOTS, planForDate } from '../data/plan.js';
 import { sumNutrition, FOODS, healthScore } from '../data/foods.js';
 import { Button, Ring, CountUp, tap } from '../components/ui.jsx';
+import { findBarcode, lookupBarcode, searchPackaged } from '../lib/foodfacts.js';
 
 const toMin = (t) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
 function guessSlot() {
@@ -57,14 +58,27 @@ export default function Scan({ onClose, initialSlot, go }) {
       photoId.current = newPhotoId();
       savePhotoFile(photoId.current, smallB64.current);
       setPendingId(null);
-      run(small.base64);
+      run(small.base64, dataUrl);
     } catch (e) {
       if (String(e?.message || e).toLowerCase().includes('cancel')) return;
       setErr(String(e?.message || e)); setStage('error');
     }
   }
 
-  async function run(base64) {
+  async function run(base64, dataUrl) {
+    // packaged food with a barcode in the photo: exact label values from Open Food Facts
+    if (dataUrl) {
+      const code = await findBarcode(dataUrl);
+      if (code) {
+        try {
+          const item = await lookupBarcode(code);
+          if (item) {
+            setRes({ is_food: true, meal_name: item.name, items: [item], health_score: healthScore(sumNutrition([item]), []), verdict: 'Packaged food · values from the label (Open Food Facts)', tip: item.vegetarian === false ? '⚠️ Open Food Facts lists this product as non-vegetarian.' : 'Check the pack size and adjust the quantity if you ate more or less.', contains_non_veg: item.vegetarian === false, contains_alcohol: false, barcode: code });
+            setStage('result'); return;
+          }
+        } catch { /* no internet: carry on with the AI or quick-pick */ }
+      }
+    }
     if (provider === 'offline') { setStage('pick'); return; }
     setStage('analyzing'); setBusyNote('');
     try {
@@ -228,11 +242,17 @@ const CAT_ORDER = { pre: ['Nuts', 'Drinks', 'Fruit'], breakfast: ['Breakfast', '
 function QuickPick({ slot, onDone, onSetup, queued, reason }) {
   const [q, setQ] = useState('');
   const [picked, setPicked] = useState([]);
+  const [packaged, setPackaged] = useState({ q: '', items: [], busy: false, err: '' });
   const planned = planForDate().meals[slot]?.items || [];
   const plannedIds = new Set(planned.map((i) => i.id));
   const list = q
-    ? FOODS.filter((f) => f.name.toLowerCase().includes(q.toLowerCase())).slice(0, 24)
+    ? [...FOODS.filter((f) => f.name.toLowerCase().includes(q.toLowerCase())).slice(0, 24), ...(packaged.q === q ? packaged.items : [])]
     : [...planned, ...FOODS.filter((f) => !plannedIds.has(f.id) && EXTRA_IDS.includes(f.id)), ...FOODS.filter((f) => !plannedIds.has(f.id) && !EXTRA_IDS.includes(f.id) && CAT_ORDER[slot].includes(f.cat)).sort((x, y) => CAT_ORDER[slot].indexOf(x.cat) - CAT_ORDER[slot].indexOf(y.cat)).slice(0, 36)];
+  const findPackaged = async () => {
+    tap(); setPackaged({ q, items: [], busy: true, err: '' });
+    try { const items = await searchPackaged(q); setPackaged({ q, items, busy: false, err: items.length ? '' : 'No packaged food found with that name.' }); }
+    catch (e) { setPackaged({ q, items: [], busy: false, err: String(e?.message || e) }); }
+  };
   const toggle = (f) => { tap(); setPicked((p) => (p.some((x) => x.id === f.id) ? p.filter((x) => x.id !== f.id) : [...p, f])); };
   const done = () => {
     const items = picked.map((f) => ({ ...f, id: 'qp_' + f.id, qty: 1 }));
@@ -269,6 +289,13 @@ function QuickPick({ slot, onDone, onSetup, queued, reason }) {
           );
         })}
       </div>
+      {q.trim().length >= 3 && (
+        <div className="tiny muted center-text">
+          {packaged.busy ? 'Searching packaged foods…' : <button className="link tiny" onClick={findPackaged}>🛒 Search packaged foods for “{q}”</button>}
+          {packaged.err && packaged.q === q && <div>{packaged.err}</div>}
+          <div style={{ opacity: 0.7, marginTop: 2 }}>Packaged-food data from <a href="https://world.openfoodfacts.org" target="_blank" rel="noreferrer">Open Food Facts</a> (ODbL)</div>
+        </div>
+      )}
       <Button className="full" disabled={!picked.length} onClick={done}>Continue with {picked.length} item{picked.length === 1 ? '' : 's'} →</Button>
       {!queued && <button className="tiny muted link" onClick={onSetup}>Want automatic photo reading? Turn on AI photo reading in Settings</button>}
     </motion.div>
