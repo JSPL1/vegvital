@@ -64,7 +64,7 @@ async function listGeminiModels() {
   const forced = setting('GEMINI_MODEL');
   if (forced) return [forced.startsWith('models/') ? forced : 'models/' + forced];
   if (geminiModels && Date.now() - geminiModelsAt < 6 * 3600e3) return geminiModels;
-  const FALLBACK = ['models/gemini-2.5-flash', 'models/gemini-2.5-flash-lite', 'models/gemini-2.0-flash', 'models/gemini-flash-latest'];
+  const FALLBACK = ['models/gemini-3.5-flash-lite', 'models/gemini-2.5-flash', 'models/gemini-2.5-flash-lite', 'models/gemini-2.0-flash', 'models/gemini-flash-latest'];
   let r;
   try { r = await tfetch(`${GEMINI}/models?pageSize=200`, { ms: 8000, headers: { 'x-goog-api-key': key.gemini() } }); } catch { return FALLBACK; }
   if (!r.ok) return FALLBACK;
