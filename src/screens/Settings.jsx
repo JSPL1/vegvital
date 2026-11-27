@@ -2,10 +2,9 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useStore, updateProfile, suggestedKcal, bmi, setState, getState } from '../lib/store.js';
 import { connectHealth, scheduleReminders, healthAvailable } from '../lib/auto.js';
-import { testKey, testGeminiKey, testGroqKey } from '../lib/ai.js';
-import { testCloud } from '../lib/cloud.js';
-import { runCloudSync } from '../lib/photos.js';
-import { backupNow, pickAndRestore, backupAgeDays, autoBackup } from '../lib/backup.js';
+import { backupNow, pickAndRestore, backupAgeDays } from '../lib/backup.js';
+import { getSession, logout, api } from '../lib/api.js';
+import { pushNow } from '../lib/sync.js';
 import { Card, stagger, rise, Button, Pill, tap } from '../components/ui.jsx';
 
 function Field({ label, children }) {
@@ -17,51 +16,28 @@ export default function Settings({ back, toast }) {
   const connected = useStore((s) => s.healthConnected);
   useStore((s) => s.lastBackup);
   const age = backupAgeDays();
-  const [key, setKey] = useState(p.apiKey);
-  const [gkey, setGkey] = useState(p.geminiKey || '');
-  const [qkey, setQkey] = useState(p.groqKey || '');
-  const [nurl, setNurl] = useState(p.neonUrl || '');
-  const [testing, setTesting] = useState(false);
+  const user = getSession()?.user;
+  const [pwOpen, setPwOpen] = useState(false);
+  const [pw, setPw] = useState({ current: '', next: '' });
   const num = (k) => (e) => updateProfile({ [k]: Number(e.target.value) });
   const str = (k) => (e) => updateProfile({ [k]: e.target.value });
 
-  async function saveKey() {
-    setTesting(true);
-    try { await testKey(key.trim()); updateProfile({ apiKey: key.trim() }); autoBackup(); toast('✅ AI key works — photo scanning is ready'); }
-    catch (e) { toast('❌ Key rejected: ' + String(e?.message || e).slice(0, 80)); }
-    setTesting(false);
+  async function changePw() {
+    try { await api('/api/me/password', { method: 'POST', body: pw }); setPw({ current: '', next: '' }); setPwOpen(false); toast('✅ Password changed'); }
+    catch (e) { toast('❌ ' + String(e?.message || e).slice(0, 80)); }
   }
 
-  async function saveGemini() {
-    setTesting(true);
-    try { const m = await testGeminiKey(gkey.trim()); updateProfile({ geminiKey: gkey.trim(), aiProvider: 'gemini' }); autoBackup(); toast(`✅ Free Gemini AI ready (${m.replace('models/', '')})`); }
-    catch (e) { toast('❌ Gemini key rejected: ' + String(e?.message || e).slice(0, 80)); }
-    setTesting(false);
+  async function deleteAccount() {
+    const pass = prompt('This permanently deletes your VegVital account, all your meals, reports and food photos. Enter your password to confirm:');
+    if (!pass) return;
+    try { await api('/api/me/delete', { method: 'POST', body: { password: pass } }); await logout(); }
+    catch (e) { toast('❌ ' + String(e?.message || e).slice(0, 80)); }
   }
 
-  async function saveGroq() {
-    setTesting(true);
-    try { const m = await testGroqKey(qkey.trim()); updateProfile({ groqKey: qkey.trim(), aiProvider: 'gemini' }); autoBackup(); toast(`✅ Groq backup AI ready (${String(m).split('/').pop()})`); }
-    catch (e) { toast('❌ Groq key rejected: ' + String(e?.message || e).slice(0, 80)); }
-    setTesting(false);
-  }
-
-  async function saveNeon() {
-    setTesting(true);
-    try {
-      const u = nurl.trim();
-      if (!/^postgres(ql)?:\/\//.test(u)) throw new Error('paste the full link that starts with postgresql://');
-      const n = await testCloud(u);
-      updateProfile({ neonUrl: u }); autoBackup();
-      toast(`✅ Neon cloud connected · ${n} photo${n === 1 ? '' : 's'} stored`);
-      runCloudSync();
-    } catch (e) {
-      const m = String(e?.message || e);
-      toast(/fetch|network/i.test(m)
-        ? '❌ Your network is blocking Neon (Jio DNS). Phone Settings → Private DNS → dns.google, then Save again.'
-        : '❌ Neon link failed: ' + m.slice(0, 80));
-    }
-    setTesting(false);
+  async function signOut() {
+    if (!confirm('Log out of VegVital on this phone? Your data stays safe in your account.')) return;
+    await pushNow();
+    await logout();
   }
 
   async function health() {
@@ -82,48 +58,29 @@ export default function Settings({ back, toast }) {
         <span />
       </motion.header>
 
+      <Card glow="#00d9f5">
+        <h3>👤 Account</h3>
+        <div className="row-between small"><span>Logged in as</span><b>{user?.email}</b></div>
+        <p className="tiny muted">Your meals, food photos and reports are saved to your account automatically and show on any phone you log in from.</p>
+        {pwOpen ? (
+          <div className="col gap">
+            <input className="input" type="password" placeholder="Current password" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} />
+            <input className="input" type="password" placeholder="New password (6+ characters)" value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} />
+            <Button onClick={changePw} disabled={!pw.current || pw.next.length < 6}>Save new password</Button>
+          </div>
+        ) : (
+          <div className="row gap">
+            <Button variant="ghost" className="grow" onClick={() => setPwOpen(true)}>🔑 Change password</Button>
+            <Button variant="danger" onClick={signOut}>Log out</Button>
+          </div>
+        )}
+        <button className="tiny muted link" style={{ marginTop: 10 }} onClick={deleteAccount}>Delete my account and data</button>
+      </Card>
+
       <Card>
-        <h3>🤖 AI food scanner</h3>
-        <div className="prov">
-          {[['gemini', '✨', 'Gemini', 'FREE'], ['offline', '👆', 'Quick-pick', 'FREE · offline'], ['claude', '🧠', 'Claude', 'paid']].map(([k, e, l, s]) => (
-            <motion.button key={k} whileTap={{ scale: 0.93 }} className={(p.aiProvider || 'gemini') === k ? 'on' : ''} onClick={() => { tap(); updateProfile({ aiProvider: k }); }}>
-              <span style={{ fontSize: 22 }}>{e}</span><b className="small">{l}</b><span className="tiny muted">{s}</span>
-            </motion.button>
-          ))}
-        </div>
-
-        {(p.aiProvider || 'gemini') === 'gemini' && (
-          <>
-            <p className="small muted">Free Google AI: no card needed. On any browser go to <b>aistudio.google.com/apikey</b>, sign in with Gmail, tap <b>Create API key</b>, copy it and paste here. The free tier easily covers several photos a day.</p>
-            <div className="row gap">
-              <input className="input grow" type="password" placeholder="AIza…" value={gkey} onChange={(e) => setGkey(e.target.value)} />
-              <Button onClick={saveGemini} disabled={testing || !gkey}>{testing ? '…' : 'Save'}</Button>
-            </div>
-            {p.geminiKey && <div className="tiny ok-text">● Connected — photos are read automatically</div>}
-            <p className="small muted" style={{ marginTop: 14 }}><b>Backup AI — Groq (free):</b> used automatically whenever Google is busy. Go to <b>console.groq.com/keys</b>, sign in with Google, tap <b>Create API Key</b>, copy and paste here.</p>
-            <div className="row gap">
-              <input className="input grow" type="password" placeholder="gsk_…" value={qkey} onChange={(e) => setQkey(e.target.value)} />
-              <Button onClick={saveGroq} disabled={testing || !qkey}>{testing ? '…' : 'Save'}</Button>
-            </div>
-            {p.groqKey && <div className="tiny ok-text">● Groq backup on — if Gemini is busy, Groq reads the photo</div>}
-          </>
-        )}
-
-        {p.aiProvider === 'offline' && (
-          <p className="small muted">No key, no internet needed. After a photo you tap the foods on your plate (your plan’s items show first) and the app counts everything from its built-in food chart.</p>
-        )}
-
-        {p.aiProvider === 'claude' && (
-          <>
-            <p className="small muted">Most accurate, paid (~2–4¢ per photo). Key from console.anthropic.com → API keys.</p>
-            <div className="row gap">
-              <input className="input grow" type="password" placeholder="sk-ant-…" value={key} onChange={(e) => setKey(e.target.value)} />
-              <Button onClick={saveKey} disabled={testing || !key}>{testing ? '…' : 'Save'}</Button>
-            </div>
-            {p.apiKey && <div className="tiny ok-text">● Connected</div>}
-          </>
-        )}
-        <p className="tiny muted">Keys stay only on this phone.</p>
+        <h3>📸 Food photo reading</h3>
+        <Toggle label="Read my food photos automatically with AI" on={p.aiProvider !== 'offline'} set={(v) => updateProfile({ aiProvider: v ? 'auto' : 'offline' })} />
+        <p className="tiny muted">{p.aiProvider === 'offline' ? 'Off: after a photo you tap the foods on your plate and the app counts them from its food chart.' : 'On: the app reads every food photo and counts kcal, protein, carbs, fat and fibre. If it is busy, the photo is saved and read later.'}</p>
       </Card>
 
       <Card>
@@ -181,21 +138,6 @@ export default function Settings({ back, toast }) {
         <p className="tiny muted">Non-veg mode will arrive in a future version — the data model already supports it.</p>
       </Card>
 
-      <Card glow="#00d9f5">
-        <h3>☁️ Photo cloud (Neon)</h3>
-        <p className="small muted">Every food photo is uploaded to your free Neon database. The phone keeps only small previews, and the photos show on any phone where you paste the same link.</p>
-        <ol className="list tiny muted">
-          <li>Open <b>console.neon.tech</b> → project <b>vegvital</b></li>
-          <li>Tap <b>Connect</b> → copy the connection string (starts with <b>postgresql://</b>)</li>
-          <li>Paste it here and tap Save</li>
-        </ol>
-        <div className="row gap">
-          <input className="input grow" type="password" placeholder="postgresql://…neon.tech/neondb?sslmode=require" value={nurl} onChange={(e) => setNurl(e.target.value)} />
-          <Button onClick={saveNeon} disabled={testing || !nurl}>{testing ? '…' : 'Save'}</Button>
-        </div>
-        {p.neonUrl && <div className="tiny ok-text">● Connected — photos upload automatically</div>}
-      </Card>
-
       <Card glow="#ffd166">
         <h3>💾 Backup & restore</h3>
         <p className="small muted">Uninstalling Android apps deletes their data. Keep a backup so your history, profile and plan come back on reinstall or a new phone.</p>
@@ -209,11 +151,10 @@ export default function Settings({ back, toast }) {
         </div>
         <ul className="list tiny muted">
           <li>☁️ Tap <b>Back up now</b> → choose <b>Google Drive</b> (or WhatsApp → Message yourself)</li>
-          <li>⬆️ Updates install over the app (Update banner) — profile, meals and photos stay. No reinstall needed.</li>
+          <li>☁️ Everything is also saved in your account — just log in again after a reinstall</li>
           <li>💾 A copy is also saved automatically every day to <b>Documents/VegVital</b> on your phone</li>
           <li>📲 After reinstalling: on the first screen tap <b>Restore from backup</b> and pick that file</li>
           <li>🔄 Android Google Backup also restores automatically if it’s on: Settings → Google → Backup → “Back up to Google Drive” ON</li>
-          <li>🔑 Keys (Gemini, Groq, Neon) are kept through updates. After a reinstall, restoring the <b>Documents › VegVital › VegVital-autobackup.json</b> file brings them back too — shared backups never include keys</li>
         </ul>
         <Button variant="danger" onClick={() => { if (confirm("Delete all logged days? Profile is kept.")) { setState({ days: {}, weights: [] }); toast("Cleared"); } }}>Clear history</Button>
       </Card>

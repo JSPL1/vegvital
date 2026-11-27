@@ -28,7 +28,7 @@ export default function PhotoDiary({ dayKey = todayKey(), toast, compact }) {
   const waiting = useStore((s) => (s.pending || []).filter((p) => p.photoId).length);
   const lastErr = useStore((s) => (s.pending || []).find((p) => p.lastErr)?.lastErr);
   const [open, setOpen] = useState(null);
-  const cloud = useStore((s) => !!(s.profile.neonUrl || '').trim());
+  const cloud = cloudOn();
   const cloudErr = useStore((s) => s.cloudErr);
   const unsynced = list.filter((p) => !p.cloud).length;
   useEffect(() => { if (cloud && !compact) { pullDay(dayKey); runCloudSync(); } }, [cloud, dayKey, compact]);
@@ -61,8 +61,8 @@ export default function PhotoDiary({ dayKey = todayKey(), toast, compact }) {
       )}
       {!compact && (
         <div className="tiny muted" style={{ marginTop: 6 }}>
-          {cloud ? (cloudErr ? <>☁️ Cloud upload paused: {/fetch/i.test(cloudErr) ? "network blocks Neon — set Private DNS to dns.google" : cloudErr}</> : unsynced ? <>☁️ Uploading {unsynced} photo{unsynced > 1 ? 's' : ''} to Neon…</> : list.length ? <>☁️ All photos saved in your Neon cloud</> : null)
-            : <>☁️ Cloud storage is off — add your Neon link in Settings</>}
+          {cloud ? (cloudErr ? <>☁️ Cloud upload paused: {cloudErr}</> : unsynced ? <>☁️ Uploading {unsynced} photo{unsynced > 1 ? 's' : ''} to your account…</> : list.length ? <>☁️ All photos saved in your account</> : null)
+            : <>☁️ Log in to save photos to your account</>}
         </div>
       )}
       {!compact && waiting > 0 && (

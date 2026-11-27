@@ -42,7 +42,7 @@ jobs:
             echo "KEYSTORE_FILE=$RUNNER_TEMP/vegvital.p12" >> "$GITHUB_ENV"
           fi
 
-      - name: Build signed release APK
+      - name: Build signed release APK + Play Store bundle (AAB)
         working-directory: android
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
@@ -50,8 +50,9 @@ jobs:
         run: |
           chmod +x gradlew
           if [ -n "$KEYSTORE_FILE" ]; then
-            ./gradlew assembleRelease --no-daemon
+            ./gradlew assembleRelease bundleRelease --no-daemon
             cp app/build/outputs/apk/release/app-release.apk "$GITHUB_WORKSPACE/VegVital.apk"
+            cp app/build/outputs/bundle/release/app-release.aab "$GITHUB_WORKSPACE/VegVital-play.aab"
           else
             ./gradlew assembleDebug --no-daemon
             cp app/build/outputs/apk/debug/app-debug.apk "$GITHUB_WORKSPACE/VegVital.apk"
@@ -60,7 +61,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: VegVital-apk
-          path: VegVital.apk
+          path: |
+            VegVital.apk
+            VegVital-play.aab
 
       - name: Publish release (download link for your phone)
         uses: softprops/action-gh-release@v2
@@ -69,5 +72,8 @@ jobs:
           name: VegVital 1.0.${{ github.run_number }}
           body: |
             Install: open this page on your Android phone → tap **VegVital.apk** → allow "Install unknown apps".
-            Updates install over the previous version and keep your data.
-          files: VegVital.apk
+            **VegVital-play.aab** is the bundle to upload in Google Play Console.
+            Log in with your VegVital account; your data is saved to https://healthtest.space.
+          files: |
+            VegVital.apk
+            VegVital-play.aab

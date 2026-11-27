@@ -77,7 +77,7 @@ export default function Scan({ onClose, initialSlot, go }) {
       setRes(r); setStage('result');
     } catch (e) {
       const m = String(e?.message || e);
-      const keyBad = m.includes('401') || m.includes('authentication') || m.includes('invalid');
+      const keyBad = e?.status === 401;
       if (!keyBad) {
         // never block logging: save the photo for automatic re-analysis and let the user quick-pick now
         if (!pendingId) {
@@ -88,7 +88,7 @@ export default function Scan({ onClose, initialSlot, go }) {
         setStage('pick');
         return;
       }
-      setErr(m.includes('401') || m.includes('authentication') ? 'Your AI key looks invalid. Check it in Settings.' : m.includes('Failed to fetch') || m.includes('Connection') ? 'No internet connection. Try again when online.' : m);
+      setErr(keyBad ? 'Your login has expired. Please log in again.' : m);
       setStage('error');
     }
   }
@@ -250,7 +250,7 @@ function QuickPick({ slot, onDone, onSetup, queued, reason }) {
     <motion.div className="scan-panel result col gap" initial={{ y: 40, opacity: 0 }} animate={{ y: 0, opacity: 1 }}>
       {queued && (
         <div className="queued">
-          <b className="small">📶 Google AI is busy — your photo is saved</b>
+          <b className="small">📶 The food AI is busy — your photo is saved</b>
           <div className="tiny muted">Log it now with a quick pick. The photo is re-checked automatically in the background and the exact AI numbers will replace this estimate.</div>
           {reason && <div className="tiny muted" style={{ opacity: 0.6, marginTop: 4 }}>{reason}</div>}
         </div>
@@ -270,7 +270,7 @@ function QuickPick({ slot, onDone, onSetup, queued, reason }) {
         })}
       </div>
       <Button className="full" disabled={!picked.length} onClick={done}>Continue with {picked.length} item{picked.length === 1 ? '' : 's'} →</Button>
-      <button className="tiny muted link" onClick={onSetup}>Want automatic photo reading? Add a free Gemini key in Settings</button>
+      {!queued && <button className="tiny muted link" onClick={onSetup}>Want automatic photo reading? Turn on AI photo reading in Settings</button>}
     </motion.div>
   );
 }

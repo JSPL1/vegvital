@@ -1,79 +1,43 @@
-// Cloud photo store on Neon (free Postgres). Each food photo is saved in the app first, then
-// uploaded here (full photo + small thumbnail). Once it is safely in the cloud the phone deletes
-// both; pictures are fetched from Neon when shown — on any device.
-import { neon } from '@neondatabase/serverless';
+// Cloud photo store: each food photo is saved in the app first, then uploaded to your account on
+// the VegVital server (full photo + small thumbnail, stored in Neon). Once it is safely in the
+// cloud the phone deletes both; pictures are fetched from the server when shown — on any device.
 import { getState, setState } from './store.js';
+import { api, loggedIn } from './api.js';
 
-let sqlFn = null, sqlUrl = '', tableReady = false, syncing = false;
+let syncing = false;
 
-function sql() {
-  const url = (getState().profile.neonUrl || '').trim();
-  if (!url) return null;
-  if (url !== sqlUrl) { sqlFn = neon(url, { disableWarningInBrowsers: true }); sqlUrl = url; tableReady = false; }
-  return sqlFn;
-}
-
-export const cloudOn = () => !!(getState().profile.neonUrl || '').trim();
-
-async function ensureTable(q) {
-  if (tableReady) return;
-  await q.query(`CREATE TABLE IF NOT EXISTS food_photos (
-    id text PRIMARY KEY, day text NOT NULL, slot text, taken_at timestamptz, status text,
-    name text, kcal int, image text, created_at timestamptz DEFAULT now())`);
-  await q.query('CREATE INDEX IF NOT EXISTS food_photos_day ON food_photos(day)');
-  await q.query('ALTER TABLE food_photos ADD COLUMN IF NOT EXISTS thumb text');
-  tableReady = true;
-}
-
-/** Check a connection string works (used by the Settings "Save" button). */
-export async function testCloud(url) {
-  const q = neon(url.trim(), { disableWarningInBrowsers: true });
-  tableReady = false; sqlUrl = url.trim(); sqlFn = q;
-  await ensureTable(q);
-  const r = await q.query('SELECT count(*)::int AS n FROM food_photos');
-  return r[0]?.n ?? 0;
-}
+export const cloudOn = () => loggedIn();
 
 export async function cloudImage(id) {
-  const q = sql(); if (!q) return null;
-  await ensureTable(q);
-  const r = await q.query('SELECT image FROM food_photos WHERE id = $1', [id]);
-  return r[0]?.image || null;
+  if (!cloudOn()) return null;
+  return (await api(`/api/photos/${encodeURIComponent(id)}/image`)).image || null;
 }
 
 /** Small picture for lists; falls back to the full photo for very old uploads. */
 export async function cloudThumb(id) {
-  const q = sql(); if (!q) return null;
-  await ensureTable(q);
-  const r = await q.query('SELECT thumb, CASE WHEN thumb IS NULL THEN image END AS image FROM food_photos WHERE id = $1', [id]);
-  return r[0] ? { thumb: r[0].thumb, image: r[0].image } : { missing: true };
+  if (!cloudOn()) return null;
+  return api(`/api/photos/${encodeURIComponent(id)}/thumb`);
 }
 
 export async function cloudSetThumb(id, thumb) {
-  const q = sql(); if (!q) return;
-  await q.query('UPDATE food_photos SET thumb = $2 WHERE id = $1', [id, thumb]);
+  if (!cloudOn()) return;
+  await api(`/api/photos/${encodeURIComponent(id)}`, { method: 'PATCH', body: { thumb } });
 }
 
 /** Upload new photos and changed details. `loadLocal(id)` returns {img, thumb} base64 from the phone; `afterUpload(entry)` lets the caller free local space. */
 export async function syncPhotos(loadLocal, afterUpload) {
-  const q = sql();
-  if (!q || syncing) return;
+  if (!cloudOn() || syncing) return;
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
   syncing = true;
   try {
-    await ensureTable(q);
     const all = Object.values(getState().photos || {}).flat().filter((p) => (!p.cloud && !p.lost) || p.cloudDirty);
     for (const p of all) {
       if (!p.cloud) {
         const { img, thumb } = await loadLocal(p.id);
         if (!img) { mark(p.id, { lost: true, cloudDirty: false }); continue; }
-        await q.query(
-          `INSERT INTO food_photos (id, day, slot, taken_at, status, name, kcal, image, thumb) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-           ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, name = EXCLUDED.name, kcal = EXCLUDED.kcal, slot = EXCLUDED.slot, thumb = COALESCE(food_photos.thumb, EXCLUDED.thumb)`,
-          [p.id, p.day, p.slot, p.time, p.status, p.name || null, p.kcal || null, img, thumb || null],
-        );
+        await api('/api/photos', { method: 'POST', timeout: 90000, body: { id: p.id, day: p.day, slot: p.slot, time: p.time, status: p.status, name: p.name, kcal: p.kcal, image: img, thumb } });
       } else {
-        await q.query('UPDATE food_photos SET status=$2, name=$3, kcal=$4, slot=$5 WHERE id=$1', [p.id, p.status, p.name || null, p.kcal || null, p.slot]);
+        await api(`/api/photos/${encodeURIComponent(p.id)}`, { method: 'PATCH', body: { status: p.status, name: p.name, kcal: p.kcal, slot: p.slot } });
       }
       mark(p.id, { cloud: true, cloudDirty: false });
       await afterUpload?.({ ...p, cloud: true });
@@ -105,25 +69,19 @@ function mergeRows(rows) {
 
 /** Photos saved from another phone/PC show up here too. */
 export async function pullDay(day) {
-  const q = sql(); if (!q) return;
-  try {
-    await ensureTable(q);
-    mergeRows(await q.query('SELECT id, day, slot, taken_at, created_at, status, name, kcal FROM food_photos WHERE day = $1', [day]));
-  } catch (e) { setState({ cloudErr: String(e?.message || e).slice(0, 140) }); }
+  if (!cloudOn()) return;
+  try { mergeRows(await api('/api/photos?day=' + encodeURIComponent(day))); } catch (e) { setState({ cloudErr: String(e?.message || e).slice(0, 140) }); }
 }
 
 /** Every photo ever uploaded (details only, no pictures) — brings old photos back after a reinstall. */
 export async function pullAll() {
-  const q = sql(); if (!q) return 0;
-  try {
-    await ensureTable(q);
-    return mergeRows(await q.query('SELECT id, day, slot, taken_at, created_at, status, name, kcal FROM food_photos ORDER BY day'));
-  } catch (e) { setState({ cloudErr: String(e?.message || e).slice(0, 140) }); return 0; }
+  if (!cloudOn()) return 0;
+  try { return mergeRows(await api('/api/photos')); } catch (e) { setState({ cloudErr: String(e?.message || e).slice(0, 140) }); return 0; }
 }
 
 export async function cloudDelete(id) {
-  const q = sql(); if (!q) return;
-  try { await q.query('DELETE FROM food_photos WHERE id = $1', [id]); } catch { /* offline: ignore */ }
+  if (!cloudOn()) return;
+  try { await api(`/api/photos/${encodeURIComponent(id)}`, { method: 'DELETE' }); } catch { /* offline: ignore */ }
 }
 
 function mark(id, patch) {

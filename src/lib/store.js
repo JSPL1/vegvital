@@ -27,9 +27,7 @@ const DEFAULT = {
     workEnd: '19:00',
     autoPlan: true, // auto-log planned meal when its time window passes
     reminders: true,
-    aiProvider: 'gemini', // gemini (free) | claude (paid) | offline
-    geminiKey: '',
-    apiKey: '',
+    aiProvider: 'auto', // auto (the server reads photos) | offline (quick-pick)
     diet: 'veg', // veg today, 'nonveg' in a future version
   },
   days: {},
@@ -41,8 +39,20 @@ let state = structuredClone(DEFAULT);
 const listeners = new Set();
 let saveTimer;
 
-function emit() {
+const changeListeners = new Set();
+/** Called after every real change (used by the server sync). */
+export const onChange = (fn) => { changeListeners.add(fn); return () => changeListeners.delete(fn); };
+
+// Old builds kept AI/database keys in the profile; they are not used any more.
+function cleanProfile(p) {
+  const { apiKey, geminiKey, groqKey, neonUrl, ...rest } = p || {};
+  if (rest.aiProvider !== 'offline') rest.aiProvider = 'auto';
+  return rest;
+}
+
+function emit(quiet) {
   listeners.forEach((l) => l());
+  if (!quiet) changeListeners.forEach((l) => l());
   clearTimeout(saveTimer);
   saveTimer = setTimeout(persist, 250);
 }
@@ -60,13 +70,25 @@ export async function loadState() {
   if (raw) {
     try {
       const s = JSON.parse(raw);
-      state = { ...DEFAULT, ...s, profile: { ...DEFAULT.profile, ...s.profile } };
+      state = { ...DEFAULT, ...s, profile: { ...DEFAULT.profile, ...cleanProfile(s.profile) } };
     } catch { /* corrupted — start fresh */ }
   }
-  emit();
+  emit(true);
 }
 
 export const getState = () => state;
+
+/** Replace everything (data loaded from the server, or a fresh start after logging out). */
+export function replaceState(next) {
+  state = next ? { ...DEFAULT, ...next, profile: { ...DEFAULT.profile, ...cleanProfile(next.profile) } } : structuredClone(DEFAULT);
+  emit(true);
+}
+
+/** Bookkeeping change that should not trigger an upload. */
+export function setQuiet(patch) {
+  state = { ...state, ...patch };
+  emit(true);
+}
 
 export function setState(updater) {
   const next = typeof updater === 'function' ? updater(state) : updater;

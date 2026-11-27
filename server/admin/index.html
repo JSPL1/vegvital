@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>VegVital Admin</title>
+<style>
+  :root { --bg:#0b1020; --card:#141b2e; --line:#243050; --text:#e8edf7; --muted:#8a96b2; --accent:#00d68f; --warn:#ffb347; --bad:#ff6b6b; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:var(--bg); color:var(--text); }
+  header { display:flex; align-items:center; gap:12px; padding:14px 20px; border-bottom:1px solid var(--line); position:sticky; top:0; background:var(--bg); z-index:2; }
+  header h1 { font-size:18px; margin:0; flex:1; }
+  main { padding:20px; max-width:1200px; margin:0 auto; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:16px; }
+  input, button, select { font:inherit; border-radius:8px; border:1px solid var(--line); background:#0f1528; color:var(--text); padding:9px 12px; }
+  button { cursor:pointer; background:#1d2742; }
+  button.primary { background:var(--accent); color:#00150c; border-color:var(--accent); font-weight:600; }
+  button.danger { color:var(--bad); }
+  button:disabled { opacity:.5; cursor:default; }
+  table { width:100%; border-collapse:collapse; }
+  th, td { text-align:left; padding:9px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--muted); font-weight:500; font-size:12px; text-transform:uppercase; letter-spacing:.04em; }
+  tr.click { cursor:pointer; } tr.click:hover td { background:#18213a; }
+  .muted { color:var(--muted); } .small { font-size:12px; }
+  .tag { display:inline-block; padding:1px 8px; border-radius:99px; font-size:12px; background:#1d2742; }
+  .tag.admin { background:#2d2350; color:#c7b6ff; } .tag.off { background:#3a1e25; color:var(--bad); }
+  .login { max-width:360px; margin:12vh auto; display:flex; flex-direction:column; gap:10px; }
+  .err { color:var(--bad); min-height:1.2em; }
+  .stats { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:10px; }
+  .stat { background:#0f1528; border:1px solid var(--line); border-radius:10px; padding:10px 12px; }
+  .stat b { display:block; font-size:20px; }
+  .bar { height:6px; border-radius:3px; background:#243050; overflow:hidden; margin-top:4px; }
+  .bar i { display:block; height:100%; background:var(--accent); }
+  .bar i.over { background:var(--warn); }
+  .photos { display:grid; grid-template-columns:repeat(auto-fill,minmax(130px,1fr)); gap:10px; }
+  .ph { background:#0f1528; border:1px solid var(--line); border-radius:10px; overflow:hidden; cursor:pointer; }
+  .ph .img { aspect-ratio:1; background:#1a2238 center/cover no-repeat; display:flex; align-items:center; justify-content:center; color:var(--muted); font-size:12px; }
+  .ph div.t { padding:6px 8px; font-size:12px; }
+  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .grow { flex:1; }
+  .big { position:fixed; inset:0; background:rgba(0,0,0,.85); display:flex; align-items:center; justify-content:center; z-index:9; cursor:zoom-out; }
+  .big img { max-width:94vw; max-height:90vh; border-radius:10px; }
+  .meals td { font-size:13px; }
+  @media (max-width:700px) { .hide-sm { display:none; } main { padding:12px; } }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+const $ = (s, el = document) => el.querySelector(s);
+const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+const fmtDate = (d) => d ? new Date(d).toLocaleString('en-IN', { day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' }) : '—';
+const ago = (d) => { if (!d) return 'never'; const m = (Date.now() - new Date(d)) / 60000; return m < 2 ? 'just now' : m < 60 ? Math.round(m) + ' min ago' : m < 1440 ? Math.round(m / 60) + ' h ago' : Math.round(m / 1440) + ' days ago'; };
+let token = localStorage.getItem('vv-admin-token') || '';
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, { method: opts.method || 'GET', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token }, body: opts.body ? JSON.stringify(opts.body) : undefined });
+  const j = await r.json().catch(() => ({}));
+  if (r.status === 401 || r.status === 403) { if (!path.startsWith('/api/auth')) { token = ''; localStorage.removeItem('vv-admin-token'); showLogin(j.error); } throw new Error(j.error || 'Not allowed'); }
+  if (!r.ok) throw new Error(j.error || 'Error ' + r.status);
+  return j;
+}
+
+function showLogin(msg = '') {
+  $('#app').innerHTML = `<form class="login card" id="lf">
+    <h2 style="margin:0">🌱 VegVital Admin</h2>
+    <input id="em" type="email" placeholder="Admin email" autocomplete="username" required>
+    <input id="pw" type="password" placeholder="Password" autocomplete="current-password" required>
+    <button class="primary">Log in</button><div class="err">${esc(msg)}</div></form>`;
+  $('#lf').onsubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const r = await api('/api/auth/login', { method: 'POST', body: { email: $('#em').value, password: $('#pw').value } });
+      if (r.user.role !== 'admin') return showLogin('This account is not an admin.');
+      token = r.token; localStorage.setItem('vv-admin-token', token); route();
+    } catch (x) { $('.err').textContent = x.message; }
+  };
+}
+
+function shell(inner, back) {
+  $('#app').innerHTML = `<header>${back ? '<button id="back">← All users</button>' : ''}<h1>🌱 VegVital Admin</h1>
+    <button id="out">Log out</button></header><main>${inner}</main>`;
+  $('#out').onclick = () => { token = ''; localStorage.removeItem('vv-admin-token'); showLogin(); };
+  if (back) $('#back').onclick = () => { location.hash = ''; };
+}
+
+const dayKcal = (d) => {
+  const meals = [...Object.values(d?.meals || {}), ...(d?.extra || [])];
+  return meals.reduce((t, m) => t + (m.items || []).reduce((s, i) => s + (+i.kcal || 0) * (i.qty ?? 1), 0), 0);
+};
+const dayMacros = (d) => {
+  const out = { p: 0, c: 0, f: 0, fb: 0 };
+  for (const m of [...Object.values(d?.meals || {}), ...(d?.extra || [])]) for (const i of m.items || []) for (const k of Object.keys(out)) out[k] += (+i[k] || 0) * (i.qty ?? 1);
+  return out;
+};
+
+async function listUsers() {
+  shell('<div class="card">Loading…</div>');
+  let users;
+  try { users = await api('/api/admin/users'); } catch (e) { return; }
+  const active7 = users.filter((u) => u.last_seen && Date.now() - new Date(u.last_seen) < 7 * 864e5).length;
+  shell(`<div class="stats" style="margin-bottom:16px">
+      <div class="stat"><span class="muted small">Users</span><b>${users.length}</b></div>
+      <div class="stat"><span class="muted small">Active last 7 days</span><b>${active7}</b></div>
+      <div class="stat"><span class="muted small">Food photos</span><b>${users.reduce((t, u) => t + u.photos, 0)}</b></div>
+      <div class="stat"><span class="muted small">Days logged</span><b>${users.reduce((t, u) => t + u.days, 0)}</b></div>
+    </div>
+    <div class="card"><div class="row" style="margin-bottom:10px"><input id="q" class="grow" placeholder="Search name or email…"></div>
+    <table><thead><tr><th>User</th><th class="hide-sm">Profile</th><th>Days</th><th>Photos</th><th>Last active</th></tr></thead><tbody id="tb"></tbody></table></div>`);
+  const draw = () => {
+    const q = $('#q').value.toLowerCase();
+    $('#tb').innerHTML = users.filter((u) => !q || (u.email + ' ' + u.name).toLowerCase().includes(q)).map((u) => {
+      const p = u.profile || {};
+      return `<tr class="click" data-id="${u.id}"><td><b>${esc(u.name || p.name || '—')}</b> ${u.role === 'admin' ? '<span class="tag admin">admin</span>' : ''} ${u.disabled ? '<span class="tag off">off</span>' : ''}<div class="muted small">${esc(u.email)}</div></td>
+        <td class="hide-sm small">${p.age ? esc(p.age) + ' y · ' + esc(p.sex || '') + ' · ' + esc(p.weightKg) + ' kg · goal ' + esc(p.goal || '') : '<span class="muted">not set up</span>'}</td>
+        <td>${u.days}</td><td>${u.photos}</td><td class="small">${ago(u.last_seen)}</td></tr>`;
+    }).join('') || '<tr><td colspan="5" class="muted">No users</td></tr>';
+    document.querySelectorAll('tr.click').forEach((tr) => tr.onclick = () => { location.hash = 'user/' + tr.dataset.id; });
+  };
+  $('#q').oninput = draw; draw();
+}
+
+const thumbCache = new Map();
+async function loadThumb(el, id) {
+  try {
+    let src = thumbCache.get(id);
+    if (!src) { const r = await api('/api/photos/' + encodeURIComponent(id) + '/thumb'); const b = r.thumb || r.image; if (!b) { el.textContent = 'no picture'; return; } src = 'data:image/jpeg;base64,' + b; thumbCache.set(id, src); }
+    el.style.backgroundImage = `url("${src}")`; el.textContent = '';
+  } catch { el.textContent = 'failed'; }
+}
+
+async function showUser(id) {
+  shell('<div class="card">Loading…</div>', true);
+  let d;
+  try { d = await api('/api/admin/users/' + id); } catch (e) { return; }
+  const u = d.user, s = d.state || {}, p = s.profile || {};
+  const keys = Object.keys(s.days || {}).sort().reverse();
+  const target = +p.targetKcal || 1650;
+  const rows = keys.slice(0, 60).map((k) => {
+    const day = s.days[k], kcal = Math.round(dayKcal(day)), m = dayMacros(day);
+    const sleep = day.sleep?.mins ? day.sleep.mins / 60 : null;
+    const pct = Math.min(100, Math.round((kcal / target) * 100));
+    return `<tr><td><b>${esc(k)}</b></td>
+      <td>${kcal} kcal<div class="bar"><i class="${kcal > target ? 'over' : ''}" style="width:${pct}%"></i></div></td>
+      <td class="small hide-sm">P ${Math.round(m.p)} · C ${Math.round(m.c)} · F ${Math.round(m.f)} · Fb ${Math.round(m.fb)}</td>
+      <td>${day.water || 0}/${p.waterGoal || 10}</td><td>${(day.steps || 0).toLocaleString('en-IN')}</td>
+      <td class="hide-sm">${sleep != null ? (+sleep).toFixed(1) + ' h' : '—'}</td><td class="hide-sm">${(day.workouts || []).length}</td>
+      <td class="small hide-sm">${Object.keys(day.meals || {}).length + (day.extra || []).length} meals</td></tr>`;
+  }).join('');
+  const weights = (s.weights || []).slice(-12);
+  shell(`<div class="card"><div class="row"><div class="grow"><h2 style="margin:0">${esc(u.name || p.name || u.email)}</h2>
+        <div class="muted">${esc(u.email)} · joined ${fmtDate(u.created_at)} · last active ${ago(u.last_seen)} · data synced ${ago(d.syncedAt)}</div></div>
+        <button id="pw">Reset password</button>
+        <button id="dis">${u.disabled ? 'Turn account on' : 'Turn account off'}</button>
+        ${u.role !== 'admin' ? '<button id="del" class="danger">Delete user</button>' : ''}</div>
+      <div class="stats" style="margin-top:14px">
+        <div class="stat"><span class="muted small">Age / sex</span><b>${esc(p.age ?? '—')} ${esc(p.sex || '')}</b></div>
+        <div class="stat"><span class="muted small">Height / weight</span><b>${esc(p.heightCm ?? '—')} cm · ${esc(p.weightKg ?? '—')} kg</b></div>
+        <div class="stat"><span class="muted small">Goal</span><b>${esc(p.goal || '—')}</b></div>
+        <div class="stat"><span class="muted small">Calorie target</span><b>${target}</b></div>
+        <div class="stat"><span class="muted small">Days logged</span><b>${keys.length}</b></div>
+        <div class="stat"><span class="muted small">Food photos</span><b>${d.photos.length}</b></div>
+      </div>
+      ${weights.length ? `<p class="small muted" style="margin-bottom:0">Weight: ${weights.map((w) => esc(w.date.slice(5)) + ' ' + (+w.kg).toFixed(1)).join(' · ')}</p>` : ''}</div>
+    <div class="card"><h3 style="margin-top:0">Daily report (last 60 days)</h3>
+      ${rows ? `<div style="overflow-x:auto"><table class="meals"><thead><tr><th>Date</th><th>Calories</th><th class="hide-sm">Macros (g)</th><th>Water</th><th>Steps</th><th class="hide-sm">Sleep</th><th class="hide-sm">Workouts</th><th class="hide-sm">Logged</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="muted">No days logged yet.</p>'}</div>
+    <div class="card"><h3 style="margin-top:0">Meals by day</h3><div class="row" style="margin-bottom:10px"><select id="day">${keys.map((k) => `<option>${esc(k)}</option>`).join('')}</select></div><div id="mealbox"></div></div>
+    <div class="card"><h3 style="margin-top:0">Food photos</h3><div class="photos" id="photos">${d.photos.map((ph) => `
+      <div class="ph" data-id="${esc(ph.id)}"><div class="img">loading…</div><div class="t"><b>${esc(ph.name || ph.slot || 'Food')}</b><div class="muted">${esc(ph.day)}${ph.kcal ? ' · ' + ph.kcal + ' kcal' : ''}</div></div></div>`).join('') || '<p class="muted">No photos.</p>'}</div></div>`, true);
+
+  const drawMeals = () => {
+    const day = s.days?.[$('#day')?.value];
+    if (!day) { $('#mealbox').innerHTML = '<p class="muted">—</p>'; return; }
+    const all = [...Object.entries(day.meals || {}).map(([slot, m]) => ({ slot, ...m })), ...(day.extra || [])];
+    $('#mealbox').innerHTML = all.length ? `<table class="meals"><thead><tr><th>Meal</th><th>Items</th><th>kcal</th><th class="hide-sm">How</th></tr></thead><tbody>${all.map((m) => `
+      <tr><td><b>${esc(m.slot)}</b><div class="muted small">${m.time ? new Date(m.time).toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit' }) : ''}</div></td>
+      <td class="small">${(m.items || []).map((i) => esc((i.emoji || '') + ' ' + i.name + ((i.qty ?? 1) !== 1 ? ' ×' + i.qty : ''))).join('<br>')}</td>
+      <td>${Math.round((m.items || []).reduce((t, i) => t + (+i.kcal || 0) * (i.qty ?? 1), 0))}</td>
+      <td class="small muted hide-sm">${esc({ photo:'📸 photo', 'quick-pick':'👆 quick-pick', plan:'✓ plan', 'plan-auto':'auto plan' }[m.source] || m.source || '')}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">Nothing logged.</p>';
+  };
+  if ($('#day')) { $('#day').onchange = drawMeals; drawMeals(); } else $('#mealbox').innerHTML = '<p class="muted">No days logged yet.</p>';
+
+  const io = new IntersectionObserver((ents) => ents.forEach((e) => { if (e.isIntersecting) { io.unobserve(e.target); loadThumb($('.img', e.target), e.target.dataset.id); } }));
+  document.querySelectorAll('.ph').forEach((el) => {
+    io.observe(el);
+    el.onclick = async () => {
+      const box = document.createElement('div'); box.className = 'big'; box.textContent = 'Loading…'; box.onclick = () => box.remove(); document.body.appendChild(box);
+      try { const r = await api('/api/photos/' + encodeURIComponent(el.dataset.id) + '/image'); box.innerHTML = r.image ? `<img src="data:image/jpeg;base64,${r.image}">` : 'No picture'; } catch (x) { box.textContent = x.message; }
+    };
+  });
+  $('#pw').onclick = async () => {
+    const pw = prompt('New password for ' + u.email + ' (6+ characters):'); if (!pw) return;
+    try { await api('/api/admin/users/' + u.id, { method: 'PATCH', body: { password: pw } }); alert('Password changed. Tell the user their new password.'); } catch (x) { alert(x.message); }
+  };
+  $('#dis').onclick = async () => { try { await api('/api/admin/users/' + u.id, { method: 'PATCH', body: { disabled: !u.disabled } }); showUser(id); } catch (x) { alert(x.message); } };
+  if ($('#del')) $('#del').onclick = async () => {
+    if (prompt('This deletes ' + u.email + ' and ALL their data and photos for good. Type DELETE to confirm.') !== 'DELETE') return;
+    try { await api('/api/admin/users/' + u.id, { method: 'DELETE' }); location.hash = ''; } catch (x) { alert(x.message); }
+  };
+}
+
+function route() {
+  if (!token) return showLogin();
+  const m = location.hash.match(/^#user\/(\d+)/);
+  m ? showUser(m[1]) : listUsers();
+}
+window.onhashchange = route;
+route();
+</script>
+</body>
+</html>

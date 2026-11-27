@@ -1,19 +1,41 @@
 <!DOCTYPE html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>VegVital Privacy Policy</title>
-    <style>body{font-family:system-ui,sans-serif;background:#070b14;color:#eef3ff;padding:20px;line-height:1.55}h1,h2{color:#00f5a0}</style>
-  </head>
-  <body>
-    <h1>VegVital Privacy Policy</h1>
-    <p>VegVital is a personal health tracker. It has no account and no server of its own.</p>
-    <h2>Health data</h2>
-    <p>With your permission the app reads steps, sleep, calories burned, heart rate and weight from Health Connect to fill your daily dashboard automatically. This data is stored only on your phone and is never sold or shared.</p>
-    <h2>Food photos</h2>
-    <p>When you take a food photo, the image is sent to Anthropic's Claude API using the API key you entered, solely to estimate the food's nutrition. Photos are not stored by the app after analysis.</p>
-    <h2>Your control</h2>
-    <p>You can revoke Health Connect access at any time in Android settings, and clear all app data from Settings → Data.</p>
-  </body>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VegVital Privacy Policy</title>
+<style>body{font-family:system-ui,sans-serif;background:#070b14;color:#eef3ff;padding:20px;line-height:1.55;max-width:760px;margin:auto}h1,h2{color:#00f5a0}a{color:#7cc4ff}</style>
+</head>
+<body>
+<h1>VegVital Privacy Policy</h1>
+<p><i>Last updated: 27 November 2026</i></p>
+<p>VegVital is a vegetarian health tracker. You use it with your own account on our server at <b>healthtest.space</b>. This page explains what we collect, why, and how you can delete it.</p>
+
+<h2>What we collect</h2>
+<ul>
+  <li><b>Account:</b> your name, email address and a scrambled (hashed) version of your password.</li>
+  <li><b>Health and fitness data you log or allow:</b> profile (age, sex, height, weight, goal), meals, food photos, water, steps, sleep, workouts, desk breaks and weight history.</li>
+  <li><b>Health Connect:</b> with your permission the app reads steps, sleep, calories burned, heart rate, SpO₂, HRV, exercise, hydration, nutrition and weight from Health Connect, and can write meals, water and workouts you log back to it. You choose which types to allow.</li>
+</ul>
+
+<h2>Why we use it</h2>
+<ul>
+  <li>To show your dashboard, history and reports, and keep them in sync across your devices.</li>
+  <li><b>Food photos</b> are stored in your account and sent to an AI service (Google Gemini, Groq, or Anthropic Claude) only to estimate the nutrition of the food in the photo. These services process the photo on our behalf and do not get your name or email.</li>
+  <li>The VegVital administrator can view accounts and their data to provide support and run the service.</li>
+</ul>
+<p>We do not sell your data, show ads, or share it with anyone else. Data from Health Connect is used only to provide the app's health features, and is never used for advertising.</p>
+
+<h2>Where it is stored</h2>
+<p>Your data is stored in a secured cloud PostgreSQL database (Neon) and sent over encrypted HTTPS. Some data is also kept on your phone so the app works offline.</p>
+
+<h2>Deleting your account</h2>
+<p>In the app open <b>Settings → Account → Delete my account and data</b>. This permanently deletes your account, all logged data and all food photos from our server. You can also ask for deletion by emailing the address on the app's Google Play page. You can revoke Health Connect access at any time in Android settings.</p>
+
+<h2>Children</h2>
+<p>VegVital is not meant for children under 13.</p>
+
+<h2>Changes</h2>
+<p>If this policy changes, the new version will be posted on this page.</p>
+</body>
 </html>

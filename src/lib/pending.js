@@ -12,7 +12,7 @@ import { photoTakenAt } from './photoDate.js';
 
 const MAX_TRIES = 60;
 const MAX_AGE_MS = 7 * 86400e3;
-const GAP_MS = 5000; // pause between photos so the free Gemini tier is not overloaded
+const GAP_MS = 5000; // pause between photos so the free AI tier is not overloaded
 
 export function queuePhoto({ base64, photoId, slot, day = todayKey(), time = new Date().toISOString() }) {
   const id = 'p_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
@@ -49,7 +49,7 @@ export async function processPending() {
         drop(item.id);
       } catch (e) {
         const msg = String(e?.message || e);
-        if (/invalid/i.test(msg)) break; // bad key: stop until the user fixes it
+        if (e?.status === 401) break; // logged out: stop until the user logs in again
         setState({ pending: (getState().pending || []).map((p) => (p.id === item.id ? { ...p, tries: p.tries + 1, lastErr: msg.slice(0, 140) } : p)) });
         break; // Google still busy: try again next round
       }

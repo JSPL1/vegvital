@@ -326,7 +326,10 @@ export async function scheduleReminders() {
 }
 
 // ---------- Boot ----------
+let automationOn = false;
 export async function startAutomation() {
+  if (automationOn) { autoLogPlannedMeals(); syncHealth(); setTimeout(runCloudSync, 3000); setTimeout(pullAll, 2000); return; }
+  automationOn = true;
   setTimeout(autoBackup, 15000);
   setTimeout(runCloudSync, 10000);
   setTimeout(pullAll, 6000);
