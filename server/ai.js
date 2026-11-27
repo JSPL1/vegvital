@@ -31,6 +31,8 @@ const JSON_SHAPE = `Reply ONLY with JSON of this exact shape:
 
 const ask = (mealLabel, remainingKcal) => `This is my ${mealLabel || 'meal'}. I have about ${Math.round(remainingKcal ?? 0)} kcal left for today. Analyse it and reply with JSON only.`;
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+const LIMIT = 20000; // one AI request may take at most 20 s, then the next AI is tried
+const tfetch = (url, opts = {}) => fetch(url, { ...opts, signal: AbortSignal.timeout(opts.ms || LIMIT) });
 
 function normalise(data) {
   const flagged = (data.items || []).some((i) => DISALLOWED_WORDS.some((w) => String(i.name).toLowerCase().includes(w)));
@@ -64,7 +66,7 @@ async function listGeminiModels() {
   if (geminiModels && Date.now() - geminiModelsAt < 6 * 3600e3) return geminiModels;
   const FALLBACK = ['models/gemini-2.5-flash', 'models/gemini-2.5-flash-lite', 'models/gemini-2.0-flash', 'models/gemini-flash-latest'];
   let r;
-  try { r = await fetch(`${GEMINI}/models?pageSize=200`, { headers: { 'x-goog-api-key': key.gemini() } }); } catch { return FALLBACK; }
+  try { r = await tfetch(`${GEMINI}/models?pageSize=200`, { ms: 8000, headers: { 'x-goog-api-key': key.gemini() } }); } catch { return FALLBACK; }
   if (!r.ok) return FALLBACK;
   const { models = [] } = await r.json();
   const ok = models.filter((m) => (m.supportedGenerationMethods || []).includes('generateContent')
@@ -74,8 +76,9 @@ async function listGeminiModels() {
     return (/preview/.test(n) ? 0 : 1000) + v * 10 + (/lite/.test(n) ? -5 : 0) + (/latest/.test(n) ? 1 : 0);
   };
   ok.sort((x, y) => score(y.name) - score(x.name));
-  const names = ok.map((m) => m.name);
-  for (const d of FALLBACK) if (!names.includes(d)) names.push(d);
+  // the fast, proven models first (newest previews can take 40 s+ per photo), then the rest
+  const avail = new Set(ok.map((m) => m.name));
+  const names = [...FALLBACK.filter((d) => !ok.length || avail.has(d)), ...ok.map((m) => m.name).filter((n) => !FALLBACK.includes(n))];
   geminiModels = names.slice(0, 8); geminiModelsAt = Date.now();
   return geminiModels;
 }
@@ -89,10 +92,10 @@ async function analyzeGemini({ base64, mediaType, mealLabel, remainingKcal }) {
     generationConfig: { responseMimeType: 'application/json', temperature: 0.2 },
   });
   let last = '';
-  const deadline = Date.now() + 15000;
+  const deadline = Date.now() + 25000;
   for (const model of order) {
     for (let attempt = 0; attempt < 2 && Date.now() < deadline; attempt++) {
-      const r = await fetch(`${GEMINI}/${model}:generateContent`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key.gemini() }, body });
+      const r = await tfetch(`${GEMINI}/${model}:generateContent`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key.gemini() }, body });
       if (r.ok) {
         const j = await r.json();
         const data = parseJson((j.candidates?.[0]?.content?.parts || []).map((p) => p.text || '').join(''));
@@ -122,7 +125,7 @@ async function listGroqModels() {
   if (setting('GROQ_MODEL')) return [setting('GROQ_MODEL')];
   if (groqModels) return groqModels;
   try {
-    const r = await fetch(GROQ + '/models', { headers: { Authorization: 'Bearer ' + key.groq() } });
+    const r = await tfetch(GROQ + '/models', { ms: 8000, headers: { Authorization: 'Bearer ' + key.groq() } });
     if (r.ok) {
       const ids = ((await r.json()).data || []).filter((m) => m.active !== false).map((m) => m.id);
       const vis = ids.filter((id) => /llama-4|vision|-vl|vl-|scout|maverick/i.test(id) && !/guard|whisper|tts/i.test(id));
@@ -142,7 +145,7 @@ async function analyzeGroq({ base64, mediaType, mealLabel, remainingKcal }) {
   const deadline = Date.now() + 15000;
   for (const model of order) {
     for (let attempt = 0; attempt < 2 && Date.now() < deadline; attempt++) {
-      const r = await fetch(GROQ + '/chat/completions', {
+      const r = await tfetch(GROQ + '/chat/completions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + key.groq() },
         body: JSON.stringify({
@@ -189,7 +192,7 @@ async function analyzeClaude({ base64, mediaType, mealLabel, remainingKcal }) {
 }
 
 const RUN = { gemini: analyzeGemini, groq: analyzeGroq, claude: analyzeClaude };
-const order = () => setting('AI_ORDER', 'gemini,groq,claude').split(',').map((x) => x.trim().toLowerCase()).filter((x) => RUN[x]);
+const order = () => setting('AI_ORDER', 'groq,gemini,claude').split(',').map((x) => x.trim().toLowerCase()).filter((x) => RUN[x]);
 
 /** Returns the analysis, or throws an error with .busy = true and .details (one line per AI) when every AI failed. */
 export async function analyzePhoto(args) {
@@ -198,7 +201,7 @@ export async function analyzePhoto(args) {
   const errs = [];
   for (const p of order()) {
     if (!key[p]()) continue;
-    try { const r = await RUN[p](a); r.provider = p; return r; } catch (e) { errs.push(`${p}: ${e.message}`); }
+    try { const r = await RUN[p](a); r.provider = p; return r; } catch (e) { errs.push(`${p}: ${e.name === 'TimeoutError' || e.name === 'AbortError' ? 'no answer within 20 s' : e.message}`); }
   }
   console.warn('[ai] all providers failed:', errs.join(' · ') || 'no keys set');
   const err = new Error(errs.length ? 'The food AI is busy right now. Your photo is saved and will be read automatically soon.' : 'Photo reading is not set up on the server yet.');
@@ -215,13 +218,13 @@ export async function testProvider(p, base64) {
   if (base64) { const r = await RUN[p]({ base64, mediaType: 'image/jpeg', mealLabel: 'meal', remainingKcal: 800 }); return { ok: true, ms: Date.now() - t0, result: r }; }
   if (p === 'gemini') {
     const models = await listGeminiModels();
-    const r = await fetch(`${GEMINI}/${models[0]}:generateContent`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key.gemini() }, body: JSON.stringify({ contents: [{ parts: [{ text: 'Reply with the single word ok' }] }] }) });
+    const r = await tfetch(`${GEMINI}/${models[0]}:generateContent`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key.gemini() }, body: JSON.stringify({ contents: [{ parts: [{ text: 'Reply with the single word ok' }] }] }) });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(`Gemini ${r.status}: ${j?.error?.message || 'error'}`.slice(0, 300));
     return { ok: true, ms: Date.now() - t0, model: models[0].replace('models/', '') };
   }
   if (p === 'groq') {
-    const r = await fetch(GROQ + '/models', { headers: { Authorization: 'Bearer ' + key.groq() } });
+    const r = await tfetch(GROQ + '/models', { ms: 8000, headers: { Authorization: 'Bearer ' + key.groq() } });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(`Groq ${r.status}: ${j?.error?.message || 'error'}`.slice(0, 300));
     groqModels = null;

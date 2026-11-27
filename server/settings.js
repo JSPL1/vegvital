@@ -9,7 +9,7 @@ export const EDITABLE = {
   GEMINI_MODEL: { label: 'Gemini model (optional)', hint: 'e.g. gemini-2.5-flash — empty = automatic' },
   GROQ_MODEL: { label: 'Groq model (optional)', hint: 'e.g. meta-llama/llama-4-scout-17b-16e-instruct — empty = automatic' },
   CLAUDE_MODEL: { label: 'Claude model (optional)', hint: 'default claude-haiku-5-5' },
-  AI_ORDER: { label: 'AI order', hint: 'comma list of gemini,groq,claude — default gemini,groq,claude' },
+  AI_ORDER: { label: 'AI order', hint: 'comma list of gemini,groq,claude — default groq,gemini,claude (fastest first)' },
   SCANS_PER_DAY: { label: 'Photo readings per user per day', hint: 'default 80' },
   ALLOW_SIGNUP: { label: 'Allow new sign-ups', hint: 'true or false' },
   OFF_ENABLED: { label: 'Open Food Facts lookups', hint: 'true or false — packaged foods by barcode / name' },
