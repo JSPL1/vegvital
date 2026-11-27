@@ -258,7 +258,7 @@ export async function testProvider(p, base64, small) {
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(`Groq ${r.status}: ${j?.error?.message || 'error'}`.slice(0, 300));
     groqModels = null;
-    return { ok: true, ms: Date.now() - t0, model: (await listGroqModels())[0] };
+    return { ok: true, ms: Date.now() - t0, model: (await listGroqModels())[0], available: (j.data || []).filter((m) => m.active !== false).map((m) => m.id) };
   }
   const anthropic = new Anthropic({ apiKey: key.claude() });
   await anthropic.messages.create({ model: setting('CLAUDE_MODEL', 'claude-haiku-5-5'), max_tokens: 16, messages: [{ role: 'user', content: 'Reply with ok' }] });
