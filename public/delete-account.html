@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Delete your VegVital account</title>
+<style>
+  body{font-family:system-ui,sans-serif;background:#070b14;color:#eef3ff;padding:20px;line-height:1.55;max-width:640px;margin:auto}
+  h1,h2{color:#00f5a0} a{color:#7cc4ff}
+  input,button{font:inherit;padding:10px 12px;border-radius:8px;border:1px solid #2a3550;background:#101828;color:#eef3ff;width:100%;box-sizing:border-box;margin:6px 0}
+  button{background:#ff6b6b;border-color:#ff6b6b;color:#1a0000;font-weight:700;cursor:pointer}
+  .box{background:#0f1626;border:1px solid #243050;border-radius:12px;padding:16px;margin-top:16px}
+  .msg{min-height:1.4em;margin-top:8px}
+</style>
+</head>
+<body>
+<h1>Delete your VegVital account</h1>
+<p>VegVital is a vegetarian health tracker by Sushanta Kumar Dash. You can delete your account and all its data at any time.</p>
+
+<h2>In the app</h2>
+<ol>
+  <li>Open VegVital and tap your avatar (top right) to open <b>Settings</b>.</li>
+  <li>In <b>Account</b>, tap <b>Delete my account and data</b>.</li>
+  <li>Enter your password to confirm.</li>
+</ol>
+
+<h2>On this page</h2>
+<div class="box">
+  <form id="f">
+    <input id="em" type="email" placeholder="Your VegVital email" autocomplete="username" required>
+    <input id="pw" type="password" placeholder="Your password" autocomplete="current-password" required>
+    <label style="display:flex;gap:8px;align-items:flex-start;margin:8px 0"><input id="ok" type="checkbox" style="width:auto;margin-top:5px" required> I understand this permanently deletes my account and all my data.</label>
+    <button>Delete my account permanently</button>
+    <div class="msg" id="msg"></div>
+  </form>
+</div>
+
+<h2>What is deleted</h2>
+<p>Your account (name, email, password), your profile, all logged meals, water, steps, sleep, workouts and weight history, and all food photos are permanently deleted from our server straight away. Nothing is kept afterwards. Data still on your phone is removed when you uninstall the app.</p>
+<p>Can't log in? Ask for deletion by email using the contact address on VegVital's Google Play page; we delete the account within 30 days.</p>
+<p><a href="/privacypolicy.html">Privacy policy</a></p>
+
+<script>
+const $ = (id) => document.getElementById(id);
+$('f').onsubmit = async (e) => {
+  e.preventDefault();
+  $('msg').textContent = 'Deleting…';
+  try {
+    const post = async (url, body, token) => {
+      const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) }, body: JSON.stringify(body) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || 'Error ' + r.status);
+      return j;
+    };
+    const { token } = await post('/api/auth/login', { email: $('em').value, password: $('pw').value });
+    await post('/api/me/delete', { password: $('pw').value }, token);
+    $('f').innerHTML = '<b>✅ Your account and all its data have been deleted.</b>';
+  } catch (x) { $('msg').textContent = '⚠️ ' + x.message; }
+};
+</script>
+</body>
+</html>
