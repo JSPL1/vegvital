@@ -33,7 +33,7 @@ app.use('/api', (req, res, next) => {
 app.use('/api', express.json({ limit: '25mb' }));
 
 // Never let a database address (it holds the password) reach the logs.
-const safe = (e) => String(e?.message || e).replace(/postgres(ql)?://S+/gi, 'postgresql://[hidden]');
+const safe = (e) => String(e?.message || e).replace(/postgres(ql)?:\/\/\S+/gi, 'postgresql://[hidden]');
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const cleanEmail = (e) => String(e || '').trim().toLowerCase();
