@@ -210,5 +210,15 @@ app.use('/admin', express.static(path.join(ROOT, 'server', 'admin')));
 app.use(express.static(path.join(ROOT, 'dist'), { index: 'index.html', maxAge: '1h' }));
 app.get(/^\/(?!api\/).*/, (req, res) => res.sendFile(path.join(ROOT, 'dist', 'index.html')));
 
+// The host may skip "npm run build": build the web app on first start if it is missing.
+import fs from 'node:fs';
+if (!fs.existsSync(path.join(ROOT, 'dist', 'index.html'))) {
+  try {
+    const { build } = await import('vite');
+    await build({ root: ROOT, logLevel: 'warn' });
+    console.log('[web] built dist/');
+  } catch (e) { console.error('[web] build failed:', e.message); }
+}
+
 app.listen(PORT, () => console.log(`VegVital server on :${PORT}`));
 migrate().then(ensureAdmin).then(() => console.log('[db] ready')).catch((e) => console.error('[db] setup failed:', e.message));
