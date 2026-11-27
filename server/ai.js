@@ -129,8 +129,10 @@ async function listGroqModels() {
     const r = await tfetch(GROQ + '/models', { ms: 8000, headers: { Authorization: 'Bearer ' + key.groq() } });
     if (r.ok) {
       const ids = ((await r.json()).data || []).filter((m) => m.active !== false).map((m) => m.id);
-      const vis = ids.filter((id) => /llama-4|vision|-vl|vl-|scout|maverick/i.test(id) && !/guard|whisper|tts/i.test(id));
+      // vision-capable chat models: Llama 4, anything named vision / vl, and Qwen 3.5+ (natively multimodal)
+      const vis = ids.filter((id) => /llama-4|vision|-vl|vl-|scout|maverick|qwen3.[5-9]|qwen-?[4-9]/i.test(id) && !/guard|whisper|tts|orpheus/i.test(id));
       vis.sort((a, b) => (/scout/i.test(b) ? 1 : 0) - (/scout/i.test(a) ? 1 : 0));
+      vis.sort((a, b) => (/qwen/i.test(b) ? 1 : 0) - (/qwen/i.test(a) ? 1 : 0));
       groqModels = [...new Set([...vis, ...GROQ_DEFAULTS.filter((d) => !ids.length || ids.includes(d))])];
       if (!groqModels.length) groqModels = GROQ_DEFAULTS;
       return groqModels;
