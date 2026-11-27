@@ -6,6 +6,7 @@
 //   GEMINI_API_KEY, GROQ_API_KEY, ANTHROPIC_API_KEY (any of them) for the food scanner
 import express from 'express';
 import path from 'node:path';
+import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { q, migrate } from './db.js';
 import { hashPassword, checkPassword, makeToken, requireUser, requireAdmin, tooMany, ensureAdmin } from './auth.js';
@@ -211,13 +212,12 @@ app.use(express.static(path.join(ROOT, 'dist'), { index: 'index.html', maxAge: '
 app.get(/^\/(?!api\/).*/, (req, res) => res.sendFile(path.join(ROOT, 'dist', 'index.html')));
 
 // The host may skip "npm run build": build the web app on first start if it is missing.
-import fs from 'node:fs';
+// (no top-level await: Hostinger loads this file with require())
 if (!fs.existsSync(path.join(ROOT, 'dist', 'index.html'))) {
-  try {
-    const { build } = await import('vite');
-    await build({ root: ROOT, logLevel: 'warn' });
-    console.log('[web] built dist/');
-  } catch (e) { console.error('[web] build failed:', e.message); }
+  import('vite')
+    .then(({ build }) => build({ root: ROOT, logLevel: 'warn' }))
+    .then(() => console.log('[web] built dist/'))
+    .catch((e) => console.error('[web] build failed:', e.message));
 }
 
 app.listen(PORT, () => console.log(`VegVital server on :${PORT}`));

@@ -5,15 +5,12 @@ const URL = process.env.DATABASE_URL || process.env.NEON_DATABASE_URL || '';
 if (!URL) console.warn('[db] DATABASE_URL is not set — the API will not work until it is.');
 
 // DATABASE_URL=pglite:memory runs a throwaway in-memory Postgres for local testing only.
-let local = null;
-if (URL.startsWith('pglite:')) {
-  const { PGlite } = await import('@electric-sql/pglite');
-  local = new PGlite();
-}
+// (no top-level await: the host loads this file with require())
+const local = URL.startsWith('pglite:') ? import('@electric-sql/pglite').then(({ PGlite }) => new PGlite()) : null;
 const sqlFn = URL && !local ? neon(URL) : null;
 
 export async function q(text, params = []) {
-  if (local) return (await local.query(text, params)).rows;
+  if (local) return (await (await local).query(text, params)).rows;
   if (!sqlFn) throw Object.assign(new Error('Database not configured'), { status: 503 });
   return sqlFn.query(text, params);
 }
