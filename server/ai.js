@@ -142,7 +142,7 @@ async function listGroqModels() {
 async function analyzeGroq({ base64, mediaType, mealLabel, remainingKcal }) {
   const list = await listGroqModels();
   const order = groqGood ? [groqGood, ...list.filter((m) => m !== groqGood)] : list;
-  let last = '';
+  let last = ''; const all = [];
   const deadline = Date.now() + 15000;
   for (const model of order) {
     for (let attempt = 0; attempt < 2 && Date.now() < deadline; attempt++) {
@@ -164,7 +164,7 @@ async function analyzeGroq({ base64, mediaType, mealLabel, remainingKcal }) {
         return normalise(data);
       }
       let msg = ''; try { msg = (await r.json())?.error?.message || ''; } catch { /* ignore */ }
-      last = `Groq ${r.status}${msg ? ': ' + msg.slice(0, 100) : ''}`;
+      last = `Groq ${r.status}${msg ? ': ' + msg.slice(0, 100) : ''}`; all.push(model.split('/').pop() + ' ' + r.status + (msg ? ' ' + msg.slice(0, 80) : ''));
       if (r.status === 401 || r.status === 403) throw new Error(last);
       if (r.status === 404 || r.status === 400) break;
       if ([429, 500, 502, 503, 504].includes(r.status)) { await wait(1500 * (attempt + 1)); continue; }
@@ -172,7 +172,7 @@ async function analyzeGroq({ base64, mediaType, mealLabel, remainingKcal }) {
     }
     if (Date.now() >= deadline) break;
   }
-  throw new Error(last || 'Groq busy');
+  throw new Error(all.length > 1 ? 'Groq: ' + all.join(' | ') : (last || 'Groq busy'));
 }
 
 // ---------- Anthropic Claude (optional, paid) ----------
