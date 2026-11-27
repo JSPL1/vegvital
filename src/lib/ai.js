@@ -12,7 +12,8 @@ export async function analyzeWithProfile(profile, { base64, mediaType = 'image/j
   if (activeProvider(profile) === 'offline') throw new Error('NO_KEY');
   onStatus?.('Reading your plate…');
   try {
-    return await api('/api/scan', { method: 'POST', timeout: 60000, body: { base64, mediaType, mealLabel, remainingKcal } });
+    let small; try { small = (await shrinkImage('data:image/jpeg;base64,' + base64, 544)).base64; } catch { /* optional */ }
+    return await api('/api/scan', { method: 'POST', timeout: 90000, body: { base64, small, mediaType, mealLabel, remainingKcal } });
   } catch (e) {
     // busy AI or no internet: the caller saves the photo and it is read automatically later
     if (e.busy || e.offline || e.status >= 500 || e.status === 429) e.busy = true;

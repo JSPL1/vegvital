@@ -155,12 +155,12 @@ app.delete('/api/photos/:id', requireUser, wrap(async (req, res) => {
 
 // ---------- AI food scan ----------
 app.post('/api/scan', requireUser, wrap(async (req, res) => {
-  const { base64, mediaType, mealLabel, remainingKcal } = req.body;
+  const { base64, small, mediaType, mealLabel, remainingKcal } = req.body;
   if (!base64 || base64.length < 100) return res.status(400).json({ error: 'No photo' });
   const n = (await q("SELECT count(*)::int AS n FROM scan_log WHERE user_id = $1 AND at > now() - interval '1 day'", [req.user.id]))[0].n;
   if (n >= +setting('SCANS_PER_DAY', '80')) return res.status(429).json({ error: 'Daily photo-reading limit reached. Use quick-pick for now.', busy: true });
   try {
-    const result = await analyzePhoto({ base64, mediaType: mediaType || 'image/jpeg', mealLabel, remainingKcal });
+    const result = await analyzePhoto({ base64, small, mediaType: mediaType || 'image/jpeg', mealLabel, remainingKcal });
     q('INSERT INTO scan_log (user_id, ok) VALUES ($1, true)', [req.user.id]).catch(() => {});
     res.json(result);
   } catch (e) {
@@ -238,19 +238,19 @@ app.put('/api/admin/settings', requireUser, requireAdmin, wrap(async (req, res) 
   const { key, value } = req.body;
   if (key === 'ALLOW_SIGNUP' || key === 'OFF_ENABLED') { if (value && !['true', 'false'].includes(String(value).trim())) return res.status(400).json({ error: 'Use true or false.' }); }
   if (key === 'SCANS_PER_DAY' && value && !(+value > 0)) return res.status(400).json({ error: 'Use a number above 0.' });
-  if (key === 'AI_ORDER' && value && !String(value).split(',').every((x) => ['gemini', 'groq', 'claude'].includes(x.trim().toLowerCase()))) return res.status(400).json({ error: 'Use only gemini, groq, claude separated by commas.' });
+  if (key === 'AI_ORDER' && value && !String(value).split(',').every((x) => ['gemini', 'groq', 'claude', 'caloriemama'].includes(x.trim().toLowerCase()))) return res.status(400).json({ error: 'Use only gemini, groq, claude, caloriemama separated by commas.' });
   await saveSetting(key, value);
   res.json({ ok: true });
 }));
 
 app.post('/api/admin/test', requireUser, requireAdmin, wrap(async (req, res) => {
-  const { target, base64, code } = req.body;
+  const { target, base64, small, code } = req.body;
   const t0 = Date.now();
   try {
     if (target === 'database') { await q('SELECT 1'); const n = (await q('SELECT count(*)::int AS n FROM users'))[0].n; return res.json({ ok: true, ms: Date.now() - t0, info: n + ' users' }); }
     if (target === 'off') { const item = await off.byBarcode(code || '3017620422003'); return res.json({ ok: !!item, ms: Date.now() - t0, item }); }
-    if (target === 'scan') { const r = await analyzePhoto({ base64, mealLabel: 'meal', remainingKcal: 800 }); return res.json({ ok: true, ms: Date.now() - t0, result: r }); }
-    res.json(await testProvider(target, base64));
+    if (target === 'scan') { const r = await analyzePhoto({ base64, small, mealLabel: 'meal', remainingKcal: 800 }); return res.json({ ok: true, ms: Date.now() - t0, result: r }); }
+    res.json(await testProvider(target, base64, small));
   } catch (e) {
     res.json({ ok: false, ms: Date.now() - t0, error: e.message, details: e.details });
   }

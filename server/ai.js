@@ -5,7 +5,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { DISALLOWED_WORDS } from '../src/data/foods.js';
 import { setting } from './settings.js';
 
-const key = { gemini: () => setting('GEMINI_API_KEY'), groq: () => setting('GROQ_API_KEY'), claude: () => setting('ANTHROPIC_API_KEY') };
+const key = { gemini: () => setting('GEMINI_API_KEY'), groq: () => setting('GROQ_API_KEY'), claude: () => setting('ANTHROPIC_API_KEY'), caloriemama: () => setting('CALORIEMAMA_API_KEY') };
 let lastKeys = '';
 function resetIfKeysChanged() {
   const k = key.gemini() + '|' + key.groq() + '|' + setting('GEMINI_MODEL') + '|' + setting('GROQ_MODEL');
@@ -191,8 +191,30 @@ async function analyzeClaude({ base64, mediaType, mealLabel, remainingKcal }) {
   return normalise(data);
 }
 
-const RUN = { gemini: analyzeGemini, groq: analyzeGroq, claude: analyzeClaude };
-const order = () => setting('AI_ORDER', 'groq,gemini,claude').split(',').map((x) => x.trim().toLowerCase()).filter((x) => RUN[x]);
+// ---------- Calorie Mama (caloriemama.ai food recognition) ----------
+// Needs a JPEG of at most 544 px (the app sends one as "small"). Nutrition comes per kg; we scale to one serving.
+const CM_URL = 'https://api-2445582032290.production.gw.apicast.io/v1/foodrecognition';
+async function analyzeCalorieMama({ small }) {
+  if (!small) throw new Error('needs the small (544 px) photo — update the app');
+  const form = new FormData();
+  form.append('media', new Blob([Buffer.from(small, 'base64')], { type: 'image/jpeg' }), 'plate.jpg');
+  const r = await tfetch(CM_URL + '?user_key=' + encodeURIComponent(key.caloriemama()), { method: 'POST', body: form });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(`Calorie Mama ${r.status}: ${j?.error?.errorDetail || 'key missing, wrong or over plan'}`.slice(0, 200));
+  if (!j.is_food) return normalise({ is_food: false, items: [], meal_name: '', health_score: 5, verdict: '', tip: '' });
+  const best = j.results?.[0]?.items?.[0];
+  if (!best) throw new Error('Calorie Mama found no dish');
+  const sv = (best.servingSizes || []).find((s) => !/^(100 g|1 oz)$/i.test(s.unit)) || best.servingSizes?.[0] || { unit: '100 g', servingWeight: 0.1 };
+  const kg = +sv.servingWeight || 0.1, n = best.nutrition || {};
+  return normalise({
+    is_food: true, meal_name: best.name,
+    items: [{ name: best.name, emoji: '🍽️', portion: sv.unit, grams: Math.round(kg * 1000), kcal: Math.round((n.calories || 0) * kg), protein_g: +((n.protein || 0) * kg * 1000).toFixed(1), carbs_g: +((n.totalCarbs || 0) * kg * 1000).toFixed(1), fat_g: +((n.totalFat || 0) * kg * 1000).toFixed(1), fiber_g: +((n.dietaryFiber || 0) * kg * 1000).toFixed(1), confidence: 0.6 }],
+    health_score: 6, verdict: 'Recognised by Calorie Mama — check the portion', tip: 'Adjust the quantity if your portion was bigger or smaller.',
+  });
+}
+
+const RUN = { gemini: analyzeGemini, groq: analyzeGroq, claude: analyzeClaude, caloriemama: analyzeCalorieMama };
+const order = () => setting('AI_ORDER', 'groq,gemini,caloriemama,claude').split(',').map((x) => x.trim().toLowerCase()).filter((x) => RUN[x]);
 
 /** Returns the analysis, or throws an error with .busy = true and .details (one line per AI) when every AI failed. */
 export async function analyzePhoto(args) {
@@ -210,12 +232,12 @@ export async function analyzePhoto(args) {
 }
 
 /** Admin "Test" button: checks one AI with a real request. Optional base64 photo, else a text-only ping. */
-export async function testProvider(p, base64) {
+export async function testProvider(p, base64, small) {
   resetIfKeysChanged();
   if (!RUN[p]) throw new Error('Unknown AI');
   if (!key[p]()) throw new Error('No key saved');
   const t0 = Date.now();
-  if (base64) { const r = await RUN[p]({ base64, mediaType: 'image/jpeg', mealLabel: 'meal', remainingKcal: 800 }); return { ok: true, ms: Date.now() - t0, result: r }; }
+  if (base64) { const r = await RUN[p]({ base64, small, mediaType: 'image/jpeg', mealLabel: 'meal', remainingKcal: 800 }); return { ok: true, ms: Date.now() - t0, result: r }; }
   if (p === 'gemini') {
     const models = await listGeminiModels();
     const r = await tfetch(`${GEMINI}/${models[0]}:generateContent`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key.gemini() }, body: JSON.stringify({ contents: [{ parts: [{ text: 'Reply with the single word ok' }] }] }) });
@@ -223,6 +245,7 @@ export async function testProvider(p, base64) {
     if (!r.ok) throw new Error(`Gemini ${r.status}: ${j?.error?.message || 'error'}`.slice(0, 300));
     return { ok: true, ms: Date.now() - t0, model: models[0].replace('models/', '') };
   }
+  if (p === 'caloriemama') throw new Error('Calorie Mama can only be tested with a photo: use "Only caloriemama" below.');
   if (p === 'groq') {
     const r = await tfetch(GROQ + '/models', { ms: 8000, headers: { Authorization: 'Bearer ' + key.groq() } });
     const j = await r.json().catch(() => ({}));
