@@ -73,7 +73,7 @@ async function listGeminiModels() {
     && /flash/i.test(m.name) && !/(image|tts|audio|live|thinking|embedding|exp)/i.test(m.name));
   const score = (n) => {
     const v = parseFloat((n.match(/gemini-(\d+(\.\d+)?)/) || [])[1] || 0);
-    return (/preview/.test(n) ? 0 : 1000) + v * 10 + (/lite/.test(n) ? -5 : 0) + (/latest/.test(n) ? 1 : 0);
+    return (/preview/.test(n) ? 0 : 1000) + v * 10 + (/lite/.test(n) ? 5 : 0) + (/latest/.test(n) ? 1 : 0); // lite = much faster per photo
   };
   ok.sort((x, y) => score(y.name) - score(x.name));
   // the fast, proven models first (newest previews can take 40 s+ per photo), then the rest
@@ -106,7 +106,8 @@ async function analyzeGemini({ base64, mediaType, mealLabel, remainingKcal }) {
       let msg = ''; try { msg = (await r.json())?.error?.message || ''; } catch { /* ignore */ }
       last = `Gemini ${r.status}${msg ? ': ' + msg.slice(0, 120) : ''}`;
       if (r.status === 401 || r.status === 403) throw new Error(last);
-      if (r.status === 404 || r.status === 400) break;
+      if (r.status === 404) { if (geminiModels) geminiModels = geminiModels.filter((x) => x !== model); break; } // retired model
+      if (r.status === 400) break;
       if (r.status === 429 && /limit: 0/.test(msg)) break;
       if ([429, 500, 502, 503, 504].includes(r.status)) { await wait(1500 * (attempt + 1)); continue; }
       break;
@@ -239,11 +240,17 @@ export async function testProvider(p, base64, small) {
   const t0 = Date.now();
   if (base64) { const r = await RUN[p]({ base64, small, mediaType: 'image/jpeg', mealLabel: 'meal', remainingKcal: 800 }); return { ok: true, ms: Date.now() - t0, result: r }; }
   if (p === 'gemini') {
-    const models = await listGeminiModels();
-    const r = await tfetch(`${GEMINI}/${models[0]}:generateContent`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key.gemini() }, body: JSON.stringify({ contents: [{ parts: [{ text: 'Reply with the single word ok' }] }] }) });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(`Gemini ${r.status}: ${j?.error?.message || 'error'}`.slice(0, 300));
-    return { ok: true, ms: Date.now() - t0, model: models[0].replace('models/', '') };
+    // same model order as photo reading; retired models (404) are skipped
+    const tried = [];
+    for (const m of (await listGeminiModels()).slice(0, 5)) {
+      const t1 = Date.now();
+      const r = await tfetch(`${GEMINI}/${m}:generateContent`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key.gemini() }, body: JSON.stringify({ contents: [{ parts: [{ text: 'Reply with the single word ok' }] }] }) });
+      const j = await r.json().catch(() => ({}));
+      if (r.ok) return { ok: true, ms: Date.now() - t0, model: m.replace('models/', ''), modelMs: Date.now() - t1, skipped: tried };
+      if (r.status === 401 || r.status === 403) throw new Error(`Gemini ${r.status}: ${j?.error?.message || 'key rejected'}`.slice(0, 300));
+      tried.push(`${m.replace('models/', '')}: ${r.status}`);
+    }
+    throw new Error('Gemini: no usable model — ' + tried.join(', '));
   }
   if (p === 'caloriemama') throw new Error('Calorie Mama can only be tested with a photo: use "Only caloriemama" below.');
   if (p === 'groq') {
