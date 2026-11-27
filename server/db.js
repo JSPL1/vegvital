@@ -1,8 +1,18 @@
 // Neon Postgres over HTTPS (works on any host, no Postgres port needed).
 import { neon } from '@neondatabase/serverless';
 
-const URL = process.env.DATABASE_URL || process.env.NEON_DATABASE_URL || '';
+// Accept the value however it was pasted: with quotes, "psql '…'", "DATABASE_URL=…" or spaces around it.
+function cleanUrl(raw) {
+  const v = String(raw || '').trim();
+  const m = v.match(/postgres(ql)?:\/\/[^\s'"`]+/i);
+  return m ? m[0] : v;
+}
+const URL = cleanUrl(process.env.DATABASE_URL || process.env.NEON_DATABASE_URL);
 if (!URL) console.warn('[db] DATABASE_URL is not set — the API will not work until it is.');
+else if (!/^postgres(ql)?:\/\/[^:@\s]+:[^@\s]+@[^/\s]+\/\S+/i.test(URL)) {
+  // describe the shape only — never print the value, it contains the password
+  console.warn(`[db] DATABASE_URL does not look like a Neon connection string (length ${URL.length}, starts with "${URL.slice(0, 13)}", has @: ${URL.includes('@')}, has neon.tech: ${URL.includes('neon.tech')}, has "…": ${URL.includes('…')}).`);
+}
 
 // DATABASE_URL=pglite:memory runs a throwaway in-memory Postgres for local testing only.
 // (no top-level await: the host loads this file with require())
