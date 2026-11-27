@@ -32,6 +32,9 @@ app.use('/api', (req, res, next) => {
 });
 app.use('/api', express.json({ limit: '25mb' }));
 
+// Never let a database address (it holds the password) reach the logs.
+const safe = (e) => String(e?.message || e).replace(/postgres(ql)?://S+/gi, 'postgresql://[hidden]');
+
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const cleanEmail = (e) => String(e || '').trim().toLowerCase();
 const publicUser = (u) => ({ id: u.id, email: u.email, name: u.name, role: u.role });
@@ -202,7 +205,7 @@ app.delete('/api/admin/users/:id', requireUser, requireAdmin, wrap(async (req, r
 
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
 app.use('/api', (err, req, res, _next) => {
-  console.error('[api]', req.method, req.path, err?.message || err);
+  console.error('[api]', req.method, req.path, safe(err));
   res.status(err.status || 500).json({ error: err.status === 503 ? err.message : 'Server error. Try again.' });
 });
 
@@ -221,4 +224,4 @@ if (!fs.existsSync(path.join(ROOT, 'dist', 'index.html'))) {
 }
 
 app.listen(PORT, () => console.log(`VegVital server on :${PORT}`));
-migrate().then(ensureAdmin).then(() => console.log('[db] ready')).catch((e) => console.error('[db] setup failed:', e.message));
+migrate().then(ensureAdmin).then(() => console.log('[db] ready')).catch((e) => console.error('[db] setup failed:', safe(e)));
