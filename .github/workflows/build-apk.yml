@@ -65,15 +65,13 @@ jobs:
             VegVital.apk
             VegVital-play.aab
 
-      - name: Publish release (download link for your phone)
+      - name: Publish Play bundle (VegVital installs and updates only from Google Play)
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v1.0.${{ github.run_number }}
-          name: VegVital 1.0.${{ github.run_number }}
+          name: VegVital 1.0.${{ github.run_number }} (Play bundle)
           body: |
-            Install: open this page on your Android phone → tap **VegVital.apk** → allow "Install unknown apps".
-            **VegVital-play.aab** is the bundle to upload in Google Play Console.
-            Log in with your VegVital account; your data is saved to https://healthtest.space.
-          files: |
-            VegVital.apk
-            VegVital-play.aab
+            **VegVital-play.aab** — upload this in Google Play Console (closed testing / production).
+            No APK is published here on purpose: install and update VegVital only from Google Play,
+            otherwise a newer sideloaded APK blocks Play updates ("Something went wrong").
+          files: VegVital-play.aab
